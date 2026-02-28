@@ -102,7 +102,7 @@ The application is deployed and publicly accessible on HuggingFace Spaces:
 ├── README_MLM_PRETRAINING.md           # Detailed pre-training documentation
 │
 ├── NLP project.pdf                     # Project specification
-├── NLP_Report.pdf                      # Final project report
+├── report.pdf                          # Final project report
 └── report.tex                          # LaTeX source for the report
 ```
 
@@ -128,6 +128,54 @@ uvicorn app:app --host 0.0.0.0 --port 7860
 Then open [http://localhost:7860](http://localhost:7860) in your browser.
 
 > **Note:** Model checkpoint files are not included in this repository due to their large size. They are hosted on [HuggingFace Spaces](https://huggingface.co/spaces/hv-123/QA-Engine).
+
+---
+
+## 📊 Model Performance
+
+### Extractive QA (SQuAD v2)
+
+Evaluated on the **full** SQuAD v2 validation set (11,873 examples, including unanswerable
+questions). Our encoder is pre-trained from scratch — no public checkpoint was used as a
+starting point — yet it outperforms the distilled DistilBERT baseline.
+
+| Model | EM | F1 |
+|-------|----|----|
+| RoBERTa-base-SQuAD2 *(ceiling reference)* | 80.4 | 83.3 |
+| BERT-large-finetuned | 66.8 | 68.3 |
+| **Our scratch encoder** | **55.8** | **58.2** |
+| DistilBERT-distilled-SQuAD | 54.6 | 55.3 |
+
+### Generative QA
+
+Evaluated with `generative_evaluation.py` on the shared 1k validation subset (all models
+scored on the identical subset for a like-for-like comparison).
+
+| Model | EM | F1 | ROUGE-L | BLEU |
+|-------|----|----|---------|------|
+| T5-base | 35.8 | 42.1 | 42.2 | 15.4 |
+| **Our generative decoder** | **34.1** | **39.9** | **40.8** | **23.1** |
+| T5-small | 31.7 | 38.1 | 38.2 | 13.4 |
+| Flan-T5-small | 26.4 | 32.0 | 32.2 | 10.7 |
+
+Our decoder beats both small T5 variants and approaches T5-base while being trained from
+scratch, and it leads every baseline on BLEU (23.1) thanks to constrained decoding
+(greedy, `max_new_tokens=12`, length penalty 0.4) that keeps answers concise —
+3.47 tokens per answer on average.
+
+### Pre-training convergence
+
+Final validation perplexity after 20k MLM steps: **5.15**. Decoder fine-tuning loss
+converged smoothly from 0.906 to 0.713.
+
+### Known limitation
+
+No-answer calibration on the **generative** head is the weakest part of the system: the
+log-probability thresholding mechanism does not reliably separate genuinely unanswerable
+questions from low-confidence answers, so we do not report a standalone no-answer accuracy
+for it. An ablation that upweighted unanswerable examples 3× made this worse, not better
+(F1 39.9 → 37.4), which is why the uniform-weight model was kept as the final configuration.
+The extractive head's CLS null-threshold gating is the more dependable of the two.
 
 ---
 
