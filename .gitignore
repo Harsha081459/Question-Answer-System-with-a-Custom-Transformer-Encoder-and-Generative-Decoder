@@ -7,6 +7,15 @@ checkpoints_*/
 *.zip
 
 # Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
 
 
 # # Model checkpoints (too large for GitHub)
@@ -18,3 +27,12 @@ checkpoints_*/
 # *.zip
 # 
 # # Python
+# __pycache__/
+# *.pyc
+# *.pyo
+# *.egg-info/
+# dist/
+# build/
+# .eggs/
+# *.egg
+# 
