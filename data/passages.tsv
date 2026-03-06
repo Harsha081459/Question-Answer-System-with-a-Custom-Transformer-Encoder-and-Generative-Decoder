@@ -1,6 +1,12 @@
 id	text	title
 1	Albert Einstein was a German-born theoretical physicist who developed the theory of relativity, one of the two pillars of modern physics. His work is also known for its influence on the philosophy of science. He received the Nobel Prize in Physics in 1921 for his explanation of the photoelectric effect.	Albert Einstein
+2	The Great Wall of China is a series of fortifications made of stone, brick, tamped earth, and other materials, built along the historical northern borders of China to protect against various nomadic groups. Several walls were being built as early as the 7th century BC.	Great Wall of China
+3	Python is a high-level, general-purpose programming language. Its design philosophy emphasizes code readability with the use of significant indentation. Python is dynamically typed and garbage-collected. It supports multiple programming paradigms, including structured, object-oriented and functional programming.	Python (programming language)
+4	The mitochondria are membrane-bound organelles found in the cytoplasm of eukaryotic cells. They generate most of the cell's supply of adenosine triphosphate (ATP), used as a source of chemical energy. Mitochondria are sometimes referred to as the powerhouse of the cell.	Mitochondria
 
 
 # id	text	title
 # 1	Albert Einstein was a German-born theoretical physicist who developed the theory of relativity, one of the two pillars of modern physics. His work is also known for its influence on the philosophy of science. He received the Nobel Prize in Physics in 1921 for his explanation of the photoelectric effect.	Albert Einstein
+# 2	The Great Wall of China is a series of fortifications made of stone, brick, tamped earth, and other materials, built along the historical northern borders of China to protect against various nomadic groups. Several walls were being built as early as the 7th century BC.	Great Wall of China
+# 3	Python is a high-level, general-purpose programming language. Its design philosophy emphasizes code readability with the use of significant indentation. Python is dynamically typed and garbage-collected. It supports multiple programming paradigms, including structured, object-oriented and functional programming.	Python (programming language)
+# 4	The mitochondria are membrane-bound organelles found in the cytoplasm of eukaryotic cells. They generate most of the cell's supply of adenosine triphosphate (ATP), used as a source of chemical energy. Mitochondria are sometimes referred to as the powerhouse of the cell.	Mitochondria
