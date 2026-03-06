@@ -16,6 +16,15 @@ build/
 .eggs/
 *.egg
 
+# Virtual environments
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
 
 
 # # Model checkpoints (too large for GitHub)
@@ -36,3 +45,12 @@ build/
 # .eggs/
 # *.egg
 # 
+# # Virtual environments
+# venv/
+# env/
+# .env/
+# 
+# # IDE
+# .vscode/
+# .idea/
+# *.swp
