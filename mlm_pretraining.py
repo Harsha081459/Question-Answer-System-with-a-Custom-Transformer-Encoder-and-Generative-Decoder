@@ -229,35 +229,150 @@ def collate_mlm(batch, tokenizer, mlm_prob=0.15):
     attention_mask = torch.zeros((bsz, max_len), dtype=torch.long)
     token_type_ids = torch.zeros((bsz, max_len), dtype=torch.long)
     for i, x in enumerate(batch):
+        length = len(x["input_ids"])
+        input_ids[i, :length] = torch.tensor(x["input_ids"], dtype=torch.long)
+        attention_mask[i, :length] = torch.tensor(x["attention_mask"], dtype=torch.long)
+        token_type_ids[i, :length] = torch.tensor(x["token_type_ids"], dtype=torch.long)
+
+    labels = torch.full_like(input_ids, -100)
+    special_mask = (
+        (input_ids == tokenizer.cls_token_id)
+        | (input_ids == tokenizer.sep_token_id)
+        | (input_ids == tokenizer.pad_token_id)
+    )
+    prob = torch.full(input_ids.shape, mlm_prob)
+    prob.masked_fill_(special_mask, 0.0)
+    masked = torch.bernoulli(prob).bool()
+    labels[masked] = input_ids[masked]
+
+    replace_prob = torch.rand(input_ids.shape)
+    mask80 = masked & (replace_prob < 0.8)
+    input_ids[mask80] = mask_id
+    rand10 = masked & (replace_prob >= 0.8) & (replace_prob < 0.9)
+    random_words = torch.randint(low=0, high=vocab_size, size=input_ids.shape, dtype=torch.long)
+    input_ids[rand10] = random_words[rand10]
+
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "token_type_ids": token_type_ids,
+        "labels": labels,
+    }
 
 
-#             text = ex.get("text", "")
-#             if not text or len(text) < 20:
-#                 continue
-#             ids = self.tokenizer.encode(text, add_special_tokens=False, truncation=False)
-#             if len(ids) == 0:
-#                 continue
-#             token_buffer.extend(ids)
-#             while len(token_buffer) >= (self.max_len - 2):
-#                 chunk = token_buffer[: self.max_len - 2]
-#                 token_buffer = token_buffer[self.max_len - 2 :]
-#                 input_ids = [self.cls_id] + chunk + [self.sep_id]
-#                 attention_mask = [1] * len(input_ids)
-#                 token_type_ids = [0] * len(input_ids)
-#                 yield {
-#                     "input_ids": input_ids,
-#                     "attention_mask": attention_mask,
-#                     "token_type_ids": token_type_ids,
-#                 }
+def make_scheduler(optimizer, warmup_steps, total_steps):
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return float(step) / max(1, warmup_steps)
+        return max(0.0, float(total_steps - step) / max(1, total_steps - warmup_steps))
+    return LambdaLR(optimizer, lr_lambda)
+
+
+def save_checkpoint(model, optimizer, scheduler, step, out_dir, cfg, tokenizer):
+    ckpt_dir = os.path.join(out_dir, f"step_{step}")
+    os.makedirs(ckpt_dir, exist_ok=True)
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "step": step,
+        },
+        os.path.join(ckpt_dir, "checkpoint.pt"),
+    )
+    with open(os.path.join(ckpt_dir, "model_config.json"), "w", encoding="utf-8") as f:
+        json.dump(asdict(cfg), f, indent=2)
+    tokenizer.save_pretrained(ckpt_dir)
+    latest_file = os.path.join(out_dir, "latest_checkpoint.txt")
+    with open(latest_file, "w", encoding="utf-8") as f:
+        f.write(ckpt_dir)
+
+
+def load_checkpoint(model, optimizer, scheduler, resume_path, device, model_only=False):
+    payload = torch.load(resume_path, map_location=device)
+    model_state = payload["model"]
+    model_pos = model.encoder.embeddings.position_embeddings.weight
+    ckpt_pos = model_state.get("encoder.embeddings.position_embeddings.weight")
+    if ckpt_pos is not None and ckpt_pos.shape != model_pos.shape:
+        if ckpt_pos.shape[1] != model_pos.shape[1]:
+            raise ValueError(
+                f"Position embedding hidden size mismatch: ckpt={ckpt_pos.shape}, model={model_pos.shape}"
+            )
+        new_pos = model_pos.detach().clone()
+        copy_len = min(ckpt_pos.shape[0], model_pos.shape[0])
+        new_pos[:copy_len] = ckpt_pos[:copy_len]
+        model_state["encoder.embeddings.position_embeddings.weight"] = new_pos
+        print(
+            f"Resized position embeddings from {ckpt_pos.shape[0]} to {model_pos.shape[0]} (copied {copy_len})."
+        )
+
+    model.load_state_dict(model_state, strict=True)
+    if not model_only:
+        optimizer.load_state_dict(payload["optimizer"])
+        scheduler.load_state_dict(payload["scheduler"])
+    return int(payload.get("step", 0))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tokenizer_name", type=str, default="bert-base-uncased")
+    parser.add_argument("--size", type=str, choices=["base", "large"], default="base")
+    parser.add_argument("--seq_len", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--grad_accum", type=int, default=8)
+    parser.add_argument("--max_steps", type=int, default=100000)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--weight_decay", type=float, default=0.01)
+    parser.add_argument("--warmup_ratio", type=float, default=0.1)
+    parser.add_argument("--max_grad_norm", type=float, default=1.0)
+    parser.add_argument("--save_every", type=int, default=5000)
+    parser.add_argument("--log_every", type=int, default=100)
+    parser.add_argument("--out_dir", type=str, default="checkpoints_pretrain")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num_workers", type=int, default=2)
+    parser.add_argument("--precision", type=str, choices=["fp16", "bf16"], default="fp16")
+    parser.add_argument("--resume_checkpoint", type=str, default="")
+    parser.add_argument("--resume_latest", action="store_true")
+    parser.add_argument("--resume_model_only", action="store_true")
+    parser.add_argument("--tf32", action="store_true")
+    args = parser.parse_args()
+
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Device: {device}")
+    if device == "cuda" and args.tf32:
+
+
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("--tokenizer_name", type=str, default="bert-base-uncased")
+#     parser.add_argument("--size", type=str, choices=["base", "large"], default="base")
+#     parser.add_argument("--seq_len", type=int, default=128)
+#     parser.add_argument("--batch_size", type=int, default=16)
+#     parser.add_argument("--grad_accum", type=int, default=8)
+#     parser.add_argument("--max_steps", type=int, default=100000)
+#     parser.add_argument("--lr", type=float, default=1e-4)
+#     parser.add_argument("--weight_decay", type=float, default=0.01)
+#     parser.add_argument("--warmup_ratio", type=float, default=0.1)
+#     parser.add_argument("--max_grad_norm", type=float, default=1.0)
+#     parser.add_argument("--save_every", type=int, default=5000)
+#     parser.add_argument("--log_every", type=int, default=100)
+#     parser.add_argument("--out_dir", type=str, default="checkpoints_pretrain")
+#     parser.add_argument("--seed", type=int, default=42)
+#     parser.add_argument("--num_workers", type=int, default=2)
+#     parser.add_argument("--precision", type=str, choices=["fp16", "bf16"], default="fp16")
+#     parser.add_argument("--resume_checkpoint", type=str, default="")
+#     parser.add_argument("--resume_latest", action="store_true")
+#     parser.add_argument("--resume_model_only", action="store_true")
+#     parser.add_argument("--tf32", action="store_true")
+#     args = parser.parse_args()
 # 
+#     random.seed(args.seed)
+#     torch.manual_seed(args.seed)
+#     torch.cuda.manual_seed_all(args.seed)
 # 
-# def collate_mlm(batch, tokenizer, mlm_prob=0.15):
-#     pad_id = tokenizer.pad_token_id
-#     mask_id = tokenizer.mask_token_id
-#     vocab_size = tokenizer.vocab_size
-#     max_len = max(len(x["input_ids"]) for x in batch)
-#     bsz = len(batch)
-#     input_ids = torch.full((bsz, max_len), pad_id, dtype=torch.long)
-#     attention_mask = torch.zeros((bsz, max_len), dtype=torch.long)
-#     token_type_ids = torch.zeros((bsz, max_len), dtype=torch.long)
-#     for i, x in enumerate(batch):
+#     device = "cuda" if torch.cuda.is_available() else "cpu"
+#     print(f"Device: {device}")
+#     if device == "cuda" and args.tf32:
