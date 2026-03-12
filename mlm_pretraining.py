@@ -344,35 +344,119 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device}")
     if device == "cuda" and args.tf32:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, use_fast=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.sep_token
+
+    cfg = ModelConfig(vocab_size=tokenizer.vocab_size, max_position_embeddings=args.seq_len)
+    for k, v in SIZE_PRESETS[args.size].items():
+        setattr(cfg, k, v)
+
+    model = BertForMLM(cfg).to(device)
+
+    dataset = StreamingTextDataset(tokenizer=tokenizer, max_len=args.seq_len, seed=args.seed)
+    loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        persistent_workers=(args.num_workers > 0),
+        collate_fn=lambda b: collate_mlm(b, tokenizer),
+    )
+    data_iter = iter(loader)
+
+    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, betas=(0.9, 0.999), eps=1e-8)
+    warmup_steps = int(args.max_steps * args.warmup_ratio)
+    scheduler = make_scheduler(optimizer, warmup_steps, args.max_steps)
+    # Compat: torch<2.3 may not expose torch.amp.GradScaler
+    if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+        scaler = torch.amp.GradScaler(enabled=(device == "cuda" and args.precision == "fp16"))
+    else:
+        scaler = torch.cuda.amp.GradScaler(enabled=(device == "cuda" and args.precision == "fp16"))
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    model.train()
+    global_step = 0
+    running_loss = 0.0
+    last_log_time = time.time()
+    tokens_since_log = 0
+
+    resume_ckpt_file = ""
+    if args.resume_checkpoint:
+        resume_ckpt_file = args.resume_checkpoint
+    elif args.resume_latest:
+        latest_file = Path(args.out_dir) / "latest_checkpoint.txt"
+        if latest_file.exists():
+            ckpt_dir = latest_file.read_text(encoding="utf-8").strip()
+            resume_ckpt_file = str(Path(ckpt_dir) / "checkpoint.pt")
+
+    if resume_ckpt_file:
+        global_step = load_checkpoint(
+            model,
+            optimizer,
+            scheduler,
+            resume_ckpt_file,
+            device,
+            model_only=args.resume_model_only,
+        )
+        if args.resume_model_only:
+            global_step = 0
+        print(f"Resumed from: {resume_ckpt_file} at step={global_step}")
+
+    try:
+        while global_step < args.max_steps:
+            optimizer.zero_grad(set_to_none=True)
+            for _ in range(args.grad_accum):
+                try:
+                    batch = next(data_iter)
+                except StopIteration:
+                    data_iter = iter(loader)
+                    batch = next(data_iter)
+
+                input_ids = batch["input_ids"].to(device, non_blocking=True)
+                attention_mask = batch["attention_mask"].to(device, non_blocking=True)
+                token_type_ids = batch["token_type_ids"].to(device, non_blocking=True)
+                labels = batch["labels"].to(device, non_blocking=True)
+
+                autocast_dtype = torch.bfloat16 if args.precision == "bf16" else torch.float16
+                with torch.autocast(device_type="cuda", dtype=autocast_dtype, enabled=(device == "cuda")):
+                    _, loss = model(input_ids, token_type_ids, attention_mask, labels)
+                    loss = loss / args.grad_accum
+                scaler.scale(loss).backward()
+                running_loss += loss.item() * args.grad_accum
+                tokens_since_log += int(attention_mask.sum().item())
+
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+            scaler.step(optimizer)
+            scaler.update()
+            scheduler.step()
+            global_step += 1
+
+            if global_step % args.log_every == 0:
+                avg_loss = running_loss / args.log_every
+                ppl = math.exp(min(avg_loss, 20))
+                lr = scheduler.get_last_lr()[0]
+                now = time.time()
+                dt = max(1e-6, now - last_log_time)
+                toks_per_sec = tokens_since_log / dt
+                print(f"step={global_step} loss={avg_loss:.4f} ppl={ppl:.2f} lr={lr:.6e} tok/s={toks_per_sec:.0f}")
+                running_loss = 0.0
+                tokens_since_log = 0
+                last_log_time = now
+
+            if global_step % args.save_every == 0:
+                save_checkpoint(model, optimizer, scheduler, global_step, args.out_dir, cfg, tokenizer)
+                print(f"Saved checkpoint at step {global_step}")
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt received, saving checkpoint...")
+    finally:
+        save_checkpoint(model, optimizer, scheduler, global_step, args.out_dir, cfg, tokenizer)
+        print(f"Training stopped. Last saved step={global_step}.")
 
 
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument("--tokenizer_name", type=str, default="bert-base-uncased")
-#     parser.add_argument("--size", type=str, choices=["base", "large"], default="base")
-#     parser.add_argument("--seq_len", type=int, default=128)
-#     parser.add_argument("--batch_size", type=int, default=16)
-#     parser.add_argument("--grad_accum", type=int, default=8)
-#     parser.add_argument("--max_steps", type=int, default=100000)
-#     parser.add_argument("--lr", type=float, default=1e-4)
-#     parser.add_argument("--weight_decay", type=float, default=0.01)
-#     parser.add_argument("--warmup_ratio", type=float, default=0.1)
-#     parser.add_argument("--max_grad_norm", type=float, default=1.0)
-#     parser.add_argument("--save_every", type=int, default=5000)
-#     parser.add_argument("--log_every", type=int, default=100)
-#     parser.add_argument("--out_dir", type=str, default="checkpoints_pretrain")
-#     parser.add_argument("--seed", type=int, default=42)
-#     parser.add_argument("--num_workers", type=int, default=2)
-#     parser.add_argument("--precision", type=str, choices=["fp16", "bf16"], default="fp16")
-#     parser.add_argument("--resume_checkpoint", type=str, default="")
-#     parser.add_argument("--resume_latest", action="store_true")
-#     parser.add_argument("--resume_model_only", action="store_true")
-#     parser.add_argument("--tf32", action="store_true")
-#     args = parser.parse_args()
-# 
-#     random.seed(args.seed)
-#     torch.manual_seed(args.seed)
-#     torch.cuda.manual_seed_all(args.seed)
-# 
-#     device = "cuda" if torch.cuda.is_available() else "cpu"
-#     print(f"Device: {device}")
-#     if device == "cuda" and args.tf32:
+if __name__ == "__main__":
+    main()
