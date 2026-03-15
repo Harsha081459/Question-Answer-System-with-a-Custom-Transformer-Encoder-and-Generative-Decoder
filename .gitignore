@@ -1,0 +1,36 @@
+# Model checkpoints (too large for GitHub)
+Organized_Models/
+checkpoints_*/
+*.pt
+*.bin
+*.safetensors
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+nohup.out
