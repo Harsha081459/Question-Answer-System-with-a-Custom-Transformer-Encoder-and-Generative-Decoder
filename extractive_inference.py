@@ -65,35 +65,68 @@ def main():
         [args.context],
         truncation="only_second",
         max_length=max_length,
+        stride=doc_stride,
+        return_overflowing_tokens=True,
+        return_offsets_mapping=True,
+        padding=False,
+        return_tensors="pt",
+    )
+
+    input_ids = enc["input_ids"]
+    attention_mask = enc["attention_mask"]
+    token_type_ids = enc.get("token_type_ids", torch.zeros_like(input_ids))
+
+    with torch.no_grad():
+        out = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
+    start_logits = out["start_logits"].cpu().numpy()
+    end_logits = out["end_logits"].cpu().numpy()
+
+    best_score = -1e30
+    best_text = ""
+    best_null_score = 1e30
+
+    for i in range(input_ids.shape[0]):
+        offsets = enc["offset_mapping"][i].tolist()
+        seq_ids = enc.sequence_ids(i)
+        ids_i = input_ids[i].tolist()
+        cls_idx = ids_i.index(tokenizer.cls_token_id)
+        null_score = float(start_logits[i][cls_idx] + end_logits[i][cls_idx])
+        if null_score < best_null_score:
+            best_null_score = null_score
+
+        s_idx = start_logits[i].argsort()[-1 : -args.n_best - 1 : -1].tolist()
+        e_idx = end_logits[i].argsort()[-1 : -args.n_best - 1 : -1].tolist()
+        for s in s_idx:
+            for e in e_idx:
 
 
+#         padding=False,
+#         return_tensors="pt",
+#     )
 # 
-#     tokenizer = AutoTokenizer.from_pretrained(str(model_dir), use_fast=True)
-#     if tokenizer.pad_token is None:
-#         tokenizer.pad_token = tokenizer.sep_token
+#     input_ids = enc["input_ids"]
+#     attention_mask = enc["attention_mask"]
+#     token_type_ids = enc.get("token_type_ids", torch.zeros_like(input_ids))
 # 
-#     model = BertForQuestionAnswering(cfg)
-#     state_path = model_dir / "model.safetensors"
-#     if not state_path.exists():
-#         raise FileNotFoundError(f"model.safetensors not found in {model_dir}")
-#     state = load_file(str(state_path))
-#     model.load_state_dict(state, strict=True)
-#     model.eval()
-#     return model, tokenizer, cfg
+#     with torch.no_grad():
+#         out = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
+#     start_logits = out["start_logits"].cpu().numpy()
+#     end_logits = out["end_logits"].cpu().numpy()
 # 
+#     best_score = -1e30
+#     best_text = ""
+#     best_null_score = 1e30
 # 
-# def main():
-#     args = parse_args()
-#     model_dir = Path(args.model_dir)
-#     pre_cfg_dir = Path(args.pretrain_config_dir) if args.pretrain_config_dir else None
+#     for i in range(input_ids.shape[0]):
+#         offsets = enc["offset_mapping"][i].tolist()
+#         seq_ids = enc.sequence_ids(i)
+#         ids_i = input_ids[i].tolist()
+#         cls_idx = ids_i.index(tokenizer.cls_token_id)
+#         null_score = float(start_logits[i][cls_idx] + end_logits[i][cls_idx])
+#         if null_score < best_null_score:
+#             best_null_score = null_score
 # 
-#     model, tokenizer, cfg = load_model_and_tokenizer(model_dir, pre_cfg_dir)
-# 
-#     max_length = min(args.max_length, cfg.max_position_embeddings)
-#     doc_stride = min(args.doc_stride, max(8, max_length // 4))
-# 
-#     enc = tokenizer(
-#         [args.question],
-#         [args.context],
-#         truncation="only_second",
-#         max_length=max_length,
+#         s_idx = start_logits[i].argsort()[-1 : -args.n_best - 1 : -1].tolist()
+#         e_idx = end_logits[i].argsort()[-1 : -args.n_best - 1 : -1].tolist()
+#         for s in s_idx:
+#             for e in e_idx:
