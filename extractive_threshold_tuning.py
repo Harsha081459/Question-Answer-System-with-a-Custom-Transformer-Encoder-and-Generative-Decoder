@@ -84,35 +84,78 @@ def main():
     preds, _, _ = trainer.predict(eval_features_model)
     start_logits, end_logits = preds
 
+    ex_id_to_idx = {k: i for i, k in enumerate(data["id"])}
+    feat_per_ex = collections.defaultdict(list)
+    for i, f in enumerate(eval_features):
+        feat_per_ex[ex_id_to_idx[f["example_id"]]].append(i)
+
+    n_best = 20
+    max_answer_length = 30
+    best_span_text = {}
+    score_diff = {}
+    references = []
+
+    for ex_idx, ex in enumerate(data):
+        context = ex["context"]
+        best_score = -1e30
+        best_text = ""
+        best_null = 1e30
+        for fi in feat_per_ex[ex_idx]:
+            sl = start_logits[fi]
+            el = end_logits[fi]
+            offs = eval_features[fi]["offset_mapping"]
+            cls_idx = eval_features[fi]["input_ids"].index(tokenizer.cls_token_id)
+            null_score = float(sl[cls_idx] + el[cls_idx])
+            if null_score < best_null:
+                best_null = null_score
+
+            s_idx = np.argsort(sl)[-1 : -n_best - 1 : -1].tolist()
+            e_idx = np.argsort(el)[-1 : -n_best - 1 : -1].tolist()
+            for s in s_idx:
+                for e in e_idx:
+                    if s >= len(offs) or e >= len(offs):
+                        continue
+                    if offs[s] is None or offs[e] is None:
+                        continue
+                    if e < s or (e - s + 1) > max_answer_length:
+                        continue
+                    st, en = offs[s][0], offs[e][1]
+                    sc = float(sl[s] + el[e])
+                    if sc > best_score:
+                        best_score = sc
+                        best_text = context[st:en]
+
+        best_span_text[ex["id"]] = best_text
+        score_diff[ex["id"]] = best_null - best_score
 
 
-#             padding=False,
-#         )
-#         sample_map = tok.pop("overflow_to_sample_mapping")
-#         tok["example_id"] = []
-#         for i in range(len(tok["input_ids"])):
-#             sids = tok.sequence_ids(i)
-#             ex_i = sample_map[i]
-#             tok["example_id"].append(examples["id"][ex_i])
-#             tok["offset_mapping"][i] = [o if sids[k] == 1 else None for k, o in enumerate(tok["offset_mapping"][i])]
-#         return tok
+#         best_score = -1e30
+#         best_text = ""
+#         best_null = 1e30
+#         for fi in feat_per_ex[ex_idx]:
+#             sl = start_logits[fi]
+#             el = end_logits[fi]
+#             offs = eval_features[fi]["offset_mapping"]
+#             cls_idx = eval_features[fi]["input_ids"].index(tokenizer.cls_token_id)
+#             null_score = float(sl[cls_idx] + el[cls_idx])
+#             if null_score < best_null:
+#                 best_null = null_score
 # 
-#     eval_features = data.map(prep, batched=True, remove_columns=data.column_names)
-#     eval_features_model = eval_features.remove_columns(["example_id", "offset_mapping"])
+#             s_idx = np.argsort(sl)[-1 : -n_best - 1 : -1].tolist()
+#             e_idx = np.argsort(el)[-1 : -n_best - 1 : -1].tolist()
+#             for s in s_idx:
+#                 for e in e_idx:
+#                     if s >= len(offs) or e >= len(offs):
+#                         continue
+#                     if offs[s] is None or offs[e] is None:
+#                         continue
+#                     if e < s or (e - s + 1) > max_answer_length:
+#                         continue
+#                     st, en = offs[s][0], offs[e][1]
+#                     sc = float(sl[s] + el[e])
+#                     if sc > best_score:
+#                         best_score = sc
+#                         best_text = context[st:en]
 # 
-#     trainer = Trainer(
-#         model=model,
-#         args=TrainingArguments(
-#             output_dir="tmp_eval_squadv2_threshold",
-#             per_device_eval_batch_size=args.batch_size,
-#             dataloader_num_workers=args.num_workers,
-#             report_to="none",
-#             remove_unused_columns=False,
-#         ),
-#         data_collator=DataCollatorWithPadding(tokenizer=tokenizer),
-#         tokenizer=tokenizer,
-#     )
-# 
-#     preds, _, _ = trainer.predict(eval_features_model)
-#     start_logits, end_logits = preds
-# 
+#         best_span_text[ex["id"]] = best_text
+#         score_diff[ex["id"]] = best_null - best_score
