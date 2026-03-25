@@ -254,35 +254,163 @@ def build_predictions_for_threshold(dataset, span_text_by_id, score_diff_by_id, 
     preds = []
     for ex in dataset:
         eid = ex["id"]
+        text = "" if score_diff_by_id[eid] > threshold else span_text_by_id[eid]
+        preds.append({"id": eid, "prediction_text": text, "no_answer_probability": 0.0})
+    return preds
 
 
-#             null_score = float(sl[cls_idx] + el[cls_idx])
-#             if null_score < best_null_score:
-#                 best_null_score = null_score
+def build_predictions_for_prob(dataset, span_text_by_id, score_diff_by_id):
+    preds = []
+    for ex in dataset:
+        eid = ex["id"]
+        p_noans = sigmoid(score_diff_by_id[eid])
+        preds.append({"id": eid, "prediction_text": span_text_by_id[eid], "no_answer_probability": p_noans})
+    return preds
+
+
+def evaluate_predictions(metric, predictions, references):
+    res = metric.compute(predictions=predictions, references=references)
+    return {k: float(v) for k, v in res.items()}
+
+
+def run_single_model(
+    spec: ModelRunSpec,
+    dataset,
+    references,
+    metric,
+    args,
+    device: str,
+):
+    print(f"[run] {spec.name} ({spec.model_ref})")
+
+    if spec.source == "custom":
+        model, tokenizer = load_custom_model_and_tokenizer(
+            model_dir=Path(spec.model_ref),
+            config_dir=Path(spec.config_ref),
+            device=device,
+        )
+    else:
+        model, tokenizer = load_hf_model_and_tokenizer(spec.model_ref, device=device)
+
+    features = tokenize_with_overflow(
+        dataset=dataset,
+        tokenizer=tokenizer,
+        max_length=args.max_length,
+        doc_stride=args.doc_stride,
+    )
+    start_logits, end_logits = collect_logits(
+        model=model,
+        tokenizer=tokenizer,
+        features=features,
+        batch_size=args.batch_size,
+        device=device,
+    )
+
+    span_text_by_id, score_diff_by_id = decode_predictions(
+        dataset=dataset,
+        features=features,
+        start_logits=start_logits,
+        end_logits=end_logits,
+        tokenizer=tokenizer,
+        n_best=args.n_best,
+        max_answer_length=args.max_answer_length,
+    )
+
+    preds_t0 = build_predictions_for_threshold(dataset, span_text_by_id, score_diff_by_id, threshold=0.0)
+    metrics_t0 = evaluate_predictions(metric, preds_t0, references)
+
+    preds_prob = build_predictions_for_prob(dataset, span_text_by_id, score_diff_by_id)
+    metrics_prob = evaluate_predictions(metric, preds_prob, references)
+
+    best_exact = metrics_prob.get("best_exact", metrics_prob.get("exact", 0.0))
+    best_f1 = metrics_prob.get("best_f1", metrics_prob.get("f1", 0.0))
+    best_exact_thresh = metrics_prob.get("best_exact_thresh", None)
+    best_f1_thresh = metrics_prob.get("best_f1_thresh", None)
+
+    return {
+        "name": spec.name,
+        "source": spec.source,
+        "model_ref": spec.model_ref,
+        "tokenizer_ref": spec.tokenizer_ref,
+        "num_examples": len(dataset),
+        "metrics_threshold0": metrics_t0,
+        "metrics_prob_sweep": metrics_prob,
+        "summary": {
+            "exact_threshold0": metrics_t0.get("exact", None),
+            "f1_threshold0": metrics_t0.get("f1", None),
+            "hasans_f1_threshold0": metrics_t0.get("HasAns_f1", None),
+            "noans_f1_threshold0": metrics_t0.get("NoAns_f1", None),
+            "best_exact": best_exact,
+            "best_f1": best_f1,
+            "best_exact_thresh": best_exact_thresh,
+            "best_f1_thresh": best_f1_thresh,
+        },
+    }
+
+
+def write_csv(path: Path, rows):
+    cols = [
+        "name",
+        "source",
+        "model_ref",
+        "best_f1",
+        "best_exact",
+        "f1_threshold0",
+        "exact_threshold0",
+        "hasans_f1_threshold0",
+        "noans_f1_threshold0",
+        "best_f1_thresh",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            s = r["summary"]
+            w.writerow(
+                {
+                    "name": r["name"],
+                    "source": r["source"],
+                    "model_ref": r["model_ref"],
+                    "best_f1": s.get("best_f1"),
+                    "best_exact": s.get("best_exact"),
+                    "f1_threshold0": s.get("f1_threshold0"),
+                    "exact_threshold0": s.get("exact_threshold0"),
+                    "hasans_f1_threshold0": s.get("hasans_f1_threshold0"),
+                    "noans_f1_threshold0": s.get("noans_f1_threshold0"),
+                    "best_f1_thresh": s.get("best_f1_thresh"),
+                }
+            )
+
+
+
+
+#         "model_ref",
+#         "best_f1",
+#         "best_exact",
+#         "f1_threshold0",
+#         "exact_threshold0",
+#         "hasans_f1_threshold0",
+#         "noans_f1_threshold0",
+#         "best_f1_thresh",
+#     ]
+#     with path.open("w", encoding="utf-8", newline="") as f:
+#         w = csv.DictWriter(f, fieldnames=cols)
+#         w.writeheader()
+#         for r in rows:
+#             s = r["summary"]
+#             w.writerow(
+#                 {
+#                     "name": r["name"],
+#                     "source": r["source"],
+#                     "model_ref": r["model_ref"],
+#                     "best_f1": s.get("best_f1"),
+#                     "best_exact": s.get("best_exact"),
+#                     "f1_threshold0": s.get("f1_threshold0"),
+#                     "exact_threshold0": s.get("exact_threshold0"),
+#                     "hasans_f1_threshold0": s.get("hasans_f1_threshold0"),
+#                     "noans_f1_threshold0": s.get("noans_f1_threshold0"),
+#                     "best_f1_thresh": s.get("best_f1_thresh"),
+#                 }
+#             )
 # 
-#             s_idx = np.argsort(sl)[-1 : -n_best - 1 : -1].tolist()
-#             e_idx = np.argsort(el)[-1 : -n_best - 1 : -1].tolist()
-#             for s in s_idx:
-#                 for e in e_idx:
-#                     if s >= len(offs) or e >= len(offs):
-#                         continue
-#                     if offs[s] is None or offs[e] is None:
-#                         continue
-#                     if e < s or (e - s + 1) > max_answer_length:
-#                         continue
-#                     st, en = offs[s][0], offs[e][1]
-#                     score = float(sl[s] + el[e])
-#                     if score > best_span_score:
-#                         best_span_score = score
-#                         best_span_text = context[st:en]
 # 
-#         span_text_by_id[ex["id"]] = best_span_text
-#         score_diff_by_id[ex["id"]] = float(best_null_score - best_span_score)
-# 
-#     return span_text_by_id, score_diff_by_id
-# 
-# 
-# def build_predictions_for_threshold(dataset, span_text_by_id, score_diff_by_id, threshold: float):
-#     preds = []
-#     for ex in dataset:
-#         eid = ex["id"]
