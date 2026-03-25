@@ -234,35 +234,82 @@ def main():
     )
 
     trainer.train()
+    trainer.save_model(args.output_dir)
+    tokenizer.save_pretrained(args.output_dir)
+
+    eval_features_for_model = eval_features.remove_columns(["example_id", "offset_mapping"])
+    predictions, _, _ = trainer.predict(eval_features_for_model)
+    start_logits, end_logits = predictions
+
+    example_id_to_index = {k: i for i, k in enumerate(eval_examples["id"])}
+    features_per_example = collections.defaultdict(list)
+    for i, f in enumerate(eval_features):
+        features_per_example[example_id_to_index[f["example_id"]]].append(i)
+
+    n_best = 20
+    max_answer_length = 30
+    final_predictions = {}
+
+    for example_index, example in enumerate(eval_examples):
+        feature_indices = features_per_example[example_index]
+        min_null_score = None
+        valid_answers = []
+
+        context = example["context"]
+        for feature_index in feature_indices:
+            s_logit = start_logits[feature_index]
+            e_logit = end_logits[feature_index]
+            offsets = eval_features[feature_index]["offset_mapping"]
+            cls_index = eval_features[feature_index]["input_ids"].index(tokenizer.cls_token_id)
+            feature_null_score = s_logit[cls_index] + e_logit[cls_index]
+            if min_null_score is None or min_null_score > feature_null_score:
+                min_null_score = feature_null_score
+
+            start_indexes = np.argsort(s_logit)[-1 : -n_best - 1 : -1].tolist()
+            end_indexes = np.argsort(e_logit)[-1 : -n_best - 1 : -1].tolist()
+            for s in start_indexes:
+                for e in end_indexes:
+                    if s >= len(offsets) or e >= len(offsets):
+                        continue
+                    if offsets[s] is None or offsets[e] is None:
+                        continue
+                    if e < s or (e - s + 1) > max_answer_length:
+                        continue
+                    start_char = offsets[s][0]
+                    end_char = offsets[e][1]
+                    valid_answers.append(
+                        {"score": s_logit[s] + e_logit[e], "text": context[start_char:end_char]}
+                    )
+
+        if valid_answers:
+            best = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[0]
+        else:
+            best = {"text": ""}
+        final_predictions[example["id"]] = best["text"]
+
+    metric = evaluate.load("squad_v2" if args.dataset == "squad_v2" else "squad")
+    formatted_predictions = []
+    for k, v in final_predictions.items():
+        pred = {"id": k, "prediction_text": v}
+        if args.dataset == "squad_v2":
+            pred["no_answer_probability"] = 0.0
+        formatted_predictions.append(pred)
+    references = [{"id": ex["id"], "answers": ex["answers"]} for ex in eval_examples]
+    results = metric.compute(predictions=formatted_predictions, references=references)
+
+    em_key = "exact_match" if "exact_match" in results else "exact"
+    f1_key = "f1"
+    if em_key in results and f1_key in results:
+        print(f"Validation EM: {results[em_key]:.2f}")
+        print(f"Validation F1: {results[f1_key]:.2f}")
+    else:
+        print(f"Validation metrics: {results}")
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    with open(Path(args.output_dir) / "squad_metrics.json", "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"Saved model + metrics to: {args.output_dir}")
 
 
-#         learning_rate=args.learning_rate,
-#         per_device_train_batch_size=args.per_device_batch_size,
-#         per_device_eval_batch_size=args.per_device_batch_size,
-#         gradient_accumulation_steps=args.grad_accum,
-#         num_train_epochs=args.num_train_epochs,
-#         weight_decay=args.weight_decay,
-#         warmup_ratio=args.warmup_ratio,
-#         lr_scheduler_type="linear",
-#         fp16=args.fp16,
-#         bf16=args.bf16,
-#         logging_steps=100,
-#         evaluation_strategy="no",
-#         save_strategy="epoch",
-#         save_total_limit=2,
-#         dataloader_num_workers=args.num_workers,
-#         report_to="none",
-#         seed=args.seed,
-#         remove_unused_columns=False,
-#     )
-# 
-#     trainer = Trainer(
-#         model=model,
-#         args=training_args,
-#         train_dataset=train_features,
-#         eval_dataset=eval_features.remove_columns(["example_id", "offset_mapping"]),
-#         tokenizer=tokenizer,
-#         data_collator=data_collator,
-#     )
-# 
-#     trainer.train()
+if __name__ == "__main__":
+    main()
