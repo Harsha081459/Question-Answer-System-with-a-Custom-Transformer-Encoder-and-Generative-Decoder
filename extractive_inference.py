@@ -98,35 +98,37 @@ def main():
         e_idx = end_logits[i].argsort()[-1 : -args.n_best - 1 : -1].tolist()
         for s in s_idx:
             for e in e_idx:
+                if s >= len(offsets) or e >= len(offsets):
+                    continue
+                if seq_ids[s] != 1 or seq_ids[e] != 1:
+                    continue
+                if e < s or (e - s + 1) > args.max_answer_length:
+                    continue
+                st, en = offsets[s][0], offsets[e][1]
+                if st is None or en is None:
+                    continue
+                score = float(start_logits[i][s] + end_logits[i][e])
+                if score > best_score:
+                    best_score = score
+                    best_text = args.context[st:en]
+
+    output = {
+        "question": args.question,
+        "answer": best_text,
+        "span_score": best_score,
+        "null_score": best_null_score,
+        "score_diff_null_minus_span": best_null_score - best_score,
+    }
+
+    if args.no_answer_threshold is not None:
+        output["no_answer_threshold"] = args.no_answer_threshold
+        output["predict_no_answer"] = (best_null_score - best_score) > args.no_answer_threshold
+        if output["predict_no_answer"]:
+            output["answer"] = ""
+
+    print(json.dumps(output, indent=2, ensure_ascii=False))
 
 
-#         padding=False,
-#         return_tensors="pt",
-#     )
-# 
-#     input_ids = enc["input_ids"]
-#     attention_mask = enc["attention_mask"]
-#     token_type_ids = enc.get("token_type_ids", torch.zeros_like(input_ids))
-# 
-#     with torch.no_grad():
-#         out = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
-#     start_logits = out["start_logits"].cpu().numpy()
-#     end_logits = out["end_logits"].cpu().numpy()
-# 
-#     best_score = -1e30
-#     best_text = ""
-#     best_null_score = 1e30
-# 
-#     for i in range(input_ids.shape[0]):
-#         offsets = enc["offset_mapping"][i].tolist()
-#         seq_ids = enc.sequence_ids(i)
-#         ids_i = input_ids[i].tolist()
-#         cls_idx = ids_i.index(tokenizer.cls_token_id)
-#         null_score = float(start_logits[i][cls_idx] + end_logits[i][cls_idx])
-#         if null_score < best_null_score:
-#             best_null_score = null_score
-# 
-#         s_idx = start_logits[i].argsort()[-1 : -args.n_best - 1 : -1].tolist()
-#         e_idx = end_logits[i].argsort()[-1 : -args.n_best - 1 : -1].tolist()
-#         for s in s_idx:
-#             for e in e_idx:
+if __name__ == "__main__":
+    main()
+
