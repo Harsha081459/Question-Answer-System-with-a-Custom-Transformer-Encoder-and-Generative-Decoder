@@ -96,35 +96,36 @@ def main():
             sl = s_logits[fi]
             el = e_logits[fi]
             offs = feats[fi]["offset_mapping"]
+            starts = np.argsort(sl)[-20:][::-1]
+            ends = np.argsort(el)[-20:][::-1]
+            for s in starts:
+                for e in ends:
+                    if s >= len(offs) or e >= len(offs) or offs[s] is None or offs[e] is None:
+                        continue
+                    if e < s or (e - s + 1) > 30:
+                        continue
+                    st, en = offs[s][0], offs[e][1]
+                    valid.append((sl[s] + el[e], ex["context"][st:en]))
+        final_preds[ex["id"]] = max(valid, key=lambda x: x[0])[1] if valid else ""
+
+    metric = evaluate.load("squad_v2" if args.dataset == "squad_v2" else "squad")
+    by_type = collections.defaultdict(lambda: {"pred": [], "ref": []})
+    for ex in data:
+        t = qtype(ex["question"])
+        pred = {"id": ex["id"], "prediction_text": final_preds[ex["id"]]}
+        if args.dataset == "squad_v2":
+            pred["no_answer_probability"] = 0.0
+        by_type[t]["pred"].append(pred)
+        by_type[t]["ref"].append({"id": ex["id"], "answers": ex["answers"]})
+
+    out = {}
+    for t, v in by_type.items():
+        out[t] = metric.compute(predictions=v["pred"], references=v["ref"])
+        out[t]["count"] = len(v["pred"])
+
+    Path(args.out_json).write_text(json.dumps(out, indent=2), encoding="utf-8")
+    print(f"Saved error analysis to {args.out_json}")
 
 
-#         return tok
-# 
-#     feats = data.map(prep, batched=True, remove_columns=data.column_names)
-#     feats_model = feats.remove_columns(["example_id", "offset_mapping"])
-# 
-#     trainer = Trainer(
-#         model=model,
-#         args=TrainingArguments(
-#             output_dir="tmp_eval",
-#             per_device_eval_batch_size=args.batch_size,
-#             dataloader_num_workers=2,
-#             report_to="none",
-#         ),
-#         tokenizer=tokenizer,
-#     )
-#     preds, _, _ = trainer.predict(feats_model)
-#     s_logits, e_logits = preds
-# 
-#     ex_id_to_idx = {k: i for i, k in enumerate(data["id"])}
-#     feat_per_ex = collections.defaultdict(list)
-#     for i, f in enumerate(feats):
-#         feat_per_ex[ex_id_to_idx[f["example_id"]]].append(i)
-# 
-#     final_preds = {}
-#     for ex_idx, ex in enumerate(data):
-#         valid = []
-#         for fi in feat_per_ex[ex_idx]:
-#             sl = s_logits[fi]
-#             el = e_logits[fi]
-#             offs = feats[fi]["offset_mapping"]
+if __name__ == "__main__":
+    main()
