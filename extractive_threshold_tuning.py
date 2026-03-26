@@ -127,35 +127,46 @@ def main():
 
         best_span_text[ex["id"]] = best_text
         score_diff[ex["id"]] = best_null - best_score
+        references.append({"id": ex["id"], "answers": ex["answers"]})
+
+    metric = evaluate.load("squad_v2")
+    diffs = np.array(list(score_diff.values()), dtype=np.float32)
+    lo, hi = float(diffs.min()), float(diffs.max())
+    thresholds = np.linspace(lo, hi, num=max(3, args.threshold_points)).tolist()
+    if 0.0 not in thresholds:
+        thresholds.append(0.0)
+    thresholds = sorted(set(round(t, 6) for t in thresholds))
+
+    best = {"f1": -1.0, "exact": -1.0, "threshold": 0.0}
+    for th in thresholds:
+        preds = []
+        for ex in data:
+            eid = ex["id"]
+            text = "" if score_diff[eid] > th else best_span_text[eid]
+            preds.append({"id": eid, "prediction_text": text, "no_answer_probability": 0.0})
+        res = metric.compute(predictions=preds, references=references)
+        if res["f1"] > best["f1"]:
+            best = {"f1": res["f1"], "exact": res["exact"], "threshold": th}
+
+    zero_preds = []
+    for ex in data:
+        eid = ex["id"]
+        text = "" if score_diff[eid] > 0.0 else best_span_text[eid]
+        zero_preds.append({"id": eid, "prediction_text": text, "no_answer_probability": 0.0})
+    zero_res = metric.compute(predictions=zero_preds, references=references)
+
+    out = {
+        "model_dir": str(finetuned_dir),
+        "threshold_zero": zero_res,
+        "best_threshold": best["threshold"],
+        "best_threshold_metrics": {"exact": best["exact"], "f1": best["f1"]},
+    }
+
+    out_path = finetuned_dir / args.out_json
+    out_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    print(json.dumps(out, indent=2))
+    print(f"Saved threshold tuning report: {out_path}")
 
 
-#         best_score = -1e30
-#         best_text = ""
-#         best_null = 1e30
-#         for fi in feat_per_ex[ex_idx]:
-#             sl = start_logits[fi]
-#             el = end_logits[fi]
-#             offs = eval_features[fi]["offset_mapping"]
-#             cls_idx = eval_features[fi]["input_ids"].index(tokenizer.cls_token_id)
-#             null_score = float(sl[cls_idx] + el[cls_idx])
-#             if null_score < best_null:
-#                 best_null = null_score
-# 
-#             s_idx = np.argsort(sl)[-1 : -n_best - 1 : -1].tolist()
-#             e_idx = np.argsort(el)[-1 : -n_best - 1 : -1].tolist()
-#             for s in s_idx:
-#                 for e in e_idx:
-#                     if s >= len(offs) or e >= len(offs):
-#                         continue
-#                     if offs[s] is None or offs[e] is None:
-#                         continue
-#                     if e < s or (e - s + 1) > max_answer_length:
-#                         continue
-#                     st, en = offs[s][0], offs[e][1]
-#                     sc = float(sl[s] + el[e])
-#                     if sc > best_score:
-#                         best_score = sc
-#                         best_text = context[st:en]
-# 
-#         best_span_text[ex["id"]] = best_text
-#         score_diff[ex["id"]] = best_null - best_score
+if __name__ == "__main__":
+    main()
