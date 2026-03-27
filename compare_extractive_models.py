@@ -382,35 +382,132 @@ def write_csv(path: Path, rows):
             )
 
 
+def write_review(path: Path, rows):
+    ok_rows = [r for r in rows if r.get("status", "ok") == "ok"]
+    if not ok_rows:
+        path.write_text("No successful model comparisons were produced.\n", encoding="utf-8")
+        return
+
+    ranked = sorted(ok_rows, key=lambda x: x["summary"]["best_f1"], reverse=True)
+    best = ranked[0]
+    lines = []
+    lines.append("SQuAD v2 Comparison Review")
+    lines.append(f"Generated: {datetime.now(timezone.utc).isoformat()}")
+    lines.append("")
+    lines.append(f"Top model by best_f1: {best['name']} ({best['summary']['best_f1']:.2f})")
+    lines.append("")
+    lines.append("Per-model highlights:")
+    for r in ranked:
+        s = r["summary"]
+        lines.append(
+            (
+                f"- {r['name']}: best_f1={s['best_f1']:.2f}, best_exact={s['best_exact']:.2f}, "
+                f"f1@thr0={s['f1_threshold0']:.2f}, hasAns_f1@thr0={s['hasans_f1_threshold0']:.2f}, "
+                f"noAns_f1@thr0={s['noans_f1_threshold0']:.2f}"
+            )
+        )
+
+    lines.append("")
+    lines.append("Interpretation:")
+    lines.append(
+        "- best_f1 / best_exact are threshold-optimized SQuAD-v2 metrics and are most reliable for model comparison."
+    )
+    lines.append(
+        "- f1@thr0 shows default no-answer behavior; large gaps between f1@thr0 and best_f1 indicate threshold calibration sensitivity."
+    )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-#         "model_ref",
-#         "best_f1",
-#         "best_exact",
-#         "f1_threshold0",
-#         "exact_threshold0",
-#         "hasans_f1_threshold0",
-#         "noans_f1_threshold0",
-#         "best_f1_thresh",
-#     ]
-#     with path.open("w", encoding="utf-8", newline="") as f:
-#         w = csv.DictWriter(f, fieldnames=cols)
-#         w.writeheader()
-#         for r in rows:
-#             s = r["summary"]
-#             w.writerow(
-#                 {
-#                     "name": r["name"],
-#                     "source": r["source"],
-#                     "model_ref": r["model_ref"],
-#                     "best_f1": s.get("best_f1"),
-#                     "best_exact": s.get("best_exact"),
-#                     "f1_threshold0": s.get("f1_threshold0"),
-#                     "exact_threshold0": s.get("exact_threshold0"),
-#                     "hasans_f1_threshold0": s.get("hasans_f1_threshold0"),
-#                     "noans_f1_threshold0": s.get("noans_f1_threshold0"),
-#                     "best_f1_thresh": s.get("best_f1_thresh"),
-#                 }
-#             )
-# 
-# 
+def main():
+    args = parse_args()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Device: {device}")
+
+    specs = []
+    if not args.skip_custom:
+        specs.append(
+            ModelRunSpec(
+                name="custom_scratch_encoder_squadv2",
+                source="custom",
+                model_ref=args.custom_model_dir,
+                tokenizer_ref=args.custom_model_dir,
+                config_ref=args.custom_config_dir,
+            )
+        )
+    for model_id in [m.strip() for m in args.hf_models.split(",") if m.strip()]:
+        safe_name = model_id.replace("/", "_")
+        specs.append(
+            ModelRunSpec(
+                name=f"hf_{safe_name}",
+                source="hf",
+                model_ref=model_id,
+                tokenizer_ref=model_id,
+            )
+        )
+
+    dataset = build_eval_dataset(args.max_eval_examples)
+    references = [{"id": ex["id"], "answers": ex["answers"]} for ex in dataset]
+    metric = evaluate.load("squad_v2")
+
+    results = {
+        "dataset": "squad_v2_validation",
+        "num_examples": len(dataset),
+        "device": device,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "args": vars(args),
+        "models": [],
+    }
+
+    for spec in specs:
+        try:
+            model_result = run_single_model(spec, dataset, references, metric, args, device)
+            model_result["status"] = "ok"
+        except Exception as e:
+            model_result = {
+                "name": spec.name,
+                "source": spec.source,
+                "model_ref": spec.model_ref,
+                "tokenizer_ref": spec.tokenizer_ref,
+                "status": "error",
+                "error": str(e),
+            }
+            print(f"[error] {spec.name}: {e}")
+        results["models"].append(model_result)
+
+    ok_rows = [r for r in results["models"] if r.get("status") == "ok"]
+    ranked = sorted(ok_rows, key=lambda x: x["summary"]["best_f1"], reverse=True)
+    results["ranking_by_best_f1"] = [
+        {
+            "rank": i + 1,
+            "name": r["name"],
+            "best_f1": r["summary"]["best_f1"],
+            "best_exact": r["summary"]["best_exact"],
+            "f1_threshold0": r["summary"]["f1_threshold0"],
+        }
+        for i, r in enumerate(ranked)
+    ]
+
+    out_json = Path(args.output_json)
+    out_json.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    print(f"Saved JSON: {out_json}")
+
+    out_csv = Path(args.output_csv)
+    write_csv(out_csv, ok_rows)
+    print(f"Saved CSV: {out_csv}")
+
+    review_txt = Path(args.review_txt)
+    write_review(review_txt, results["models"])
+    print(f"Saved review: {review_txt}")
+
+    if ranked:
+        top = ranked[0]
+        print(
+            f"Top model: {top['name']} | best_f1={top['summary']['best_f1']:.2f} "
+            f"| best_exact={top['summary']['best_exact']:.2f}"
+        )
+    else:
+        print("No successful model runs.")
+
+
+if __name__ == "__main__":
+    main()
