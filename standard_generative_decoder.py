@@ -114,35 +114,93 @@ class GenerativeQAModel(nn.Module):
         logits = self.decode(memory, encoder_attention_mask, decoder_input_ids, decoder_attention_mask)
         out = {"logits": logits}
         if labels is not None:
+            loss = F.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                labels.reshape(-1),
+                ignore_index=-100,
+                label_smoothing=label_smoothing,
+            )
+            out["loss"] = loss
+        return out
+
+    @torch.no_grad()
+    def sequence_logprob(
+        self,
+        encoder_input_ids: torch.Tensor,
+        encoder_token_type_ids: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+        target_ids: torch.Tensor,
+        pad_token_id: int,
+        normalize_by_length: bool = True,
+    ) -> torch.Tensor:
+        """
+        Score full target sequences with teacher forcing.
+        target_ids must include BOS/CLS at position 0 and EOS/SEP at the end.
+        """
+        if target_ids.size(1) < 2:
+            return torch.zeros(target_ids.size(0), device=target_ids.device)
+
+        memory = self.encode(encoder_input_ids, encoder_token_type_ids, encoder_attention_mask)
+        dec_in = target_ids[:, :-1]
+        labels = target_ids[:, 1:]
+        dec_mask = (dec_in != pad_token_id).long()
+        logits = self.decode(memory, encoder_attention_mask, dec_in, dec_mask)
+        log_probs = F.log_softmax(logits, dim=-1)
+        token_logp = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+        valid = labels != pad_token_id
+        seq_logp = (token_logp * valid).sum(dim=1)
+        if not normalize_by_length:
+            return seq_logp
+        lengths = valid.sum(dim=1).clamp(min=1)
+        return seq_logp / lengths
+
+    @torch.no_grad()
+    def generate(
+        self,
+        encoder_input_ids: torch.Tensor,
+        encoder_token_type_ids: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+        bos_token_id: int,
+        eos_token_id: int,
+        pad_token_id: int,
+        max_new_tokens: int = 32,
+        beam_size: int = 4,
+        length_penalty: float = 1.0,
+        return_logprob: bool = False,
+    ):
+        # Beam search for single-example inference
+        assert encoder_input_ids.size(0) == 1, "generate currently supports batch size 1."
+        memory = self.encode(encoder_input_ids, encoder_token_type_ids, encoder_attention_mask)
+        beams = [(torch.tensor([[bos_token_id]], device=memory.device), 0.0, False)]
 
 
-#         decoder_attention_mask: torch.Tensor,
-#     ) -> torch.Tensor:
-#         dec_inp = self.decoder_embeddings(decoder_input_ids)
-#         tgt_mask = self._causal_mask(decoder_input_ids.size(1), decoder_input_ids.device)
-#         tgt_key_padding_mask = decoder_attention_mask == 0
-#         memory_key_padding_mask = encoder_attention_mask == 0
-#         dec_out = self.decoder(
-#             tgt=dec_inp,
-#             memory=memory,
-#             tgt_mask=tgt_mask,
-#             tgt_key_padding_mask=tgt_key_padding_mask,
-#             memory_key_padding_mask=memory_key_padding_mask,
-#         )
-#         dec_out = self.final_ln(dec_out)
-#         return self.lm_head(dec_out)
+#         labels = target_ids[:, 1:]
+#         dec_mask = (dec_in != pad_token_id).long()
+#         logits = self.decode(memory, encoder_attention_mask, dec_in, dec_mask)
+#         log_probs = F.log_softmax(logits, dim=-1)
+#         token_logp = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+#         valid = labels != pad_token_id
+#         seq_logp = (token_logp * valid).sum(dim=1)
+#         if not normalize_by_length:
+#             return seq_logp
+#         lengths = valid.sum(dim=1).clamp(min=1)
+#         return seq_logp / lengths
 # 
-#     def forward(
+#     @torch.no_grad()
+#     def generate(
 #         self,
 #         encoder_input_ids: torch.Tensor,
 #         encoder_token_type_ids: torch.Tensor,
 #         encoder_attention_mask: torch.Tensor,
-#         decoder_input_ids: torch.Tensor,
-#         decoder_attention_mask: torch.Tensor,
-#         labels: Optional[torch.Tensor] = None,
-#         label_smoothing: float = 0.0,
-#     ) -> dict:
+#         bos_token_id: int,
+#         eos_token_id: int,
+#         pad_token_id: int,
+#         max_new_tokens: int = 32,
+#         beam_size: int = 4,
+#         length_penalty: float = 1.0,
+#         return_logprob: bool = False,
+#     ):
+#         # Beam search for single-example inference
+#         assert encoder_input_ids.size(0) == 1, "generate currently supports batch size 1."
 #         memory = self.encode(encoder_input_ids, encoder_token_type_ids, encoder_attention_mask)
-#         logits = self.decode(memory, encoder_attention_mask, decoder_input_ids, decoder_attention_mask)
-#         out = {"logits": logits}
-#         if labels is not None:
+#         beams = [(torch.tensor([[bos_token_id]], device=memory.device), 0.0, False)]
