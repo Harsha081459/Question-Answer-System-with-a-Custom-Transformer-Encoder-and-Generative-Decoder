@@ -142,35 +142,107 @@ def add_targets(example, target_style: str = "span", no_answer_target_text: str 
     return {"target_text": target}
 
 
+def preprocess_dataset(
+    dataset,
+    tokenizer,
+    max_input_len: int,
+    max_target_len: int,
+    target_style: str = "span",
+    no_answer_target_text: str = NO_ANSWER_TEXT,
+    instruction_prefix: str = "",
+):
+    if target_style not in {"span", "sentence"}:
+        raise ValueError("target_style must be one of: span, sentence")
+
+    dataset = dataset.map(
+        add_targets,
+        fn_kwargs={
+            "target_style": target_style,
+            "no_answer_target_text": no_answer_target_text,
+        },
+    )
+
+    def _tok(examples):
+        if instruction_prefix:
+            inputs = [
+                f"{instruction_prefix.strip()} question: {q} context: {c}"
+                for q, c in zip(examples["question"], examples["context"])
+            ]
+        else:
+            inputs = [f"question: {q} context: {c}" for q, c in zip(examples["question"], examples["context"])]
+        model_inputs = tokenizer(
+            inputs,
+            truncation=True,
+            max_length=max_input_len,
+            padding=False,
+        )
+        targets = tokenizer(
+            examples["target_text"],
+            truncation=True,
+            max_length=max_target_len,
+            padding=False,
+        )
+        model_inputs["labels_ids"] = targets["input_ids"]
+        model_inputs["target_text"] = examples["target_text"]
+        return model_inputs
+
+    keep_cols = ["id", "question", "context", "answers"]
+    tokenized = dataset.map(_tok, batched=True, remove_columns=[c for c in dataset.column_names if c not in keep_cols])
+    return tokenized
 
 
-#     answer_start = answer_starts[0] if answer_starts else -1
-#     if answer_start is None or answer_start < 0:
-#         answer_start = context.lower().find(answer_text.lower())
+def _pad_2d(seqs, pad_val: int):
+    max_len = max(len(x) for x in seqs)
+    out = torch.full((len(seqs), max_len), pad_val, dtype=torch.long)
+    for i, x in enumerate(seqs):
+        out[i, : len(x)] = torch.tensor(x, dtype=torch.long)
+    return out
+
+
+def collate_generative(batch, tokenizer):
+    pad = tokenizer.pad_token_id
+    bos = tokenizer.cls_token_id if tokenizer.cls_token_id is not None else tokenizer.bos_token_id
+    eos = tokenizer.sep_token_id if tokenizer.sep_token_id is not None else tokenizer.eos_token_id
+    if bos is None:
+        bos = pad
+    if eos is None:
+        eos = pad
+
+    enc_ids = _pad_2d([x["input_ids"] for x in batch], pad)
+    enc_attn = _pad_2d([x["attention_mask"] for x in batch], 0)
+    enc_ttype = torch.zeros_like(enc_ids)
+
+    tgt = []
+    for x in batch:
+
+
+#         return model_inputs
 # 
-#     if answer_start is not None and answer_start >= 0:
-#         sent = _slice_sentence_around_index(context, int(answer_start))
-#         if sent:
-#             return sent
-# 
-#     # Fallback: try direct sentence search via regex split.
-#     for sent in re.split(r"(?<=[.!?])\s+", context):
-#         s = sent.strip()
-#         if s and answer_text.lower() in s.lower():
-#             return s
-# 
-#     return answer_text
+#     keep_cols = ["id", "question", "context", "answers"]
+#     tokenized = dataset.map(_tok, batched=True, remove_columns=[c for c in dataset.column_names if c not in keep_cols])
+#     return tokenized
 # 
 # 
-# def add_targets(example, target_style: str = "span", no_answer_target_text: str = NO_ANSWER_TEXT):
-#     answers = example["answers"]
-#     if len(answers["text"]) == 0:
-#         target = no_answer_target_text.strip()
-#     else:
-#         if target_style == "sentence":
-#             target = _find_answer_sentence(example.get("context", ""), answers)
-#         else:
-#             target = answers["text"][0].strip()
-#     return {"target_text": target}
+# def _pad_2d(seqs, pad_val: int):
+#     max_len = max(len(x) for x in seqs)
+#     out = torch.full((len(seqs), max_len), pad_val, dtype=torch.long)
+#     for i, x in enumerate(seqs):
+#         out[i, : len(x)] = torch.tensor(x, dtype=torch.long)
+#     return out
 # 
 # 
+# def collate_generative(batch, tokenizer):
+#     pad = tokenizer.pad_token_id
+#     bos = tokenizer.cls_token_id if tokenizer.cls_token_id is not None else tokenizer.bos_token_id
+#     eos = tokenizer.sep_token_id if tokenizer.sep_token_id is not None else tokenizer.eos_token_id
+#     if bos is None:
+#         bos = pad
+#     if eos is None:
+#         eos = pad
+# 
+#     enc_ids = _pad_2d([x["input_ids"] for x in batch], pad)
+#     enc_attn = _pad_2d([x["attention_mask"] for x in batch], 0)
+#     enc_ttype = torch.zeros_like(enc_ids)
+# 
+#     tgt = []
+#     for x in batch:
