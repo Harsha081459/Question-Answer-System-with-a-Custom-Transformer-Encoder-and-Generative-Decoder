@@ -198,35 +198,135 @@ def main():
     p.add_argument("--freeze_warmup_epochs", type=int, default=2)
     p.add_argument("--unfreeze_top_layers", type=int, default=4)
     p.add_argument("--no_squad_v2", action="store_true")
+    p.add_argument("--answerable_repeat", type=int, default=1)
+    p.add_argument("--no_answer_repeat", type=int, default=1)
+    p.add_argument("--target_style", choices=["span", "sentence"], default="span")
+    p.add_argument("--no_answer_target_text", default=NO_ANSWER_TEXT)
+    p.add_argument("--instruction_prefix", default="")
+    p.add_argument("--decoder_variant", choices=["standard", "hybrid"], default="standard")
+    p.add_argument("--bf16", action="store_true")
+    p.add_argument("--fp16", action="store_true")
+    args = p.parse_args()
+
+    if args.answerable_repeat < 1:
+        raise ValueError("--answerable_repeat must be >= 1")
+    if args.no_answer_repeat < 1:
+        raise ValueError("--no_answer_repeat must be >= 1")
+    if args.target_style == "sentence" and args.no_answer_target_text == NO_ANSWER_TEXT:
+        args.no_answer_target_text = NO_ANSWER_SENTENCE
+
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Device: {device}")
+    print(
+        f"Decoder variant: {args.decoder_variant} | "
+        f"Target style: {args.target_style} | "
+        f"No-answer target: {args.no_answer_target_text} | "
+        f"Instruction prefix: {args.instruction_prefix or '(none)'}"
+    )
+    if device == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+    tok_cfg = GenQADataConfig(
+        tokenizer_path=args.tokenizer_path,
+        max_input_len=args.max_input_len,
+        max_target_len=args.max_target_len,
+        include_squad_v2=not args.no_squad_v2,
+        answerable_repeat=args.answerable_repeat,
+        no_answer_repeat=args.no_answer_repeat,
+        target_style=args.target_style,
+        no_answer_target_text=args.no_answer_target_text,
+        instruction_prefix=args.instruction_prefix,
+        seed=args.seed,
+    )
+    tokenizer, train_loader, val_loader = build_dataloaders(
+        cfg=tok_cfg,
+        train_batch_size=args.train_batch_size,
+        eval_batch_size=args.eval_batch_size,
+        num_workers=args.num_workers,
+    )
+
+    enc_cfg = ModelConfig(
+        vocab_size=tokenizer.vocab_size,
+        max_position_embeddings=args.max_input_len,
+        hidden_size=768,
+        num_hidden_layers=12,
+        num_attention_heads=12,
+        intermediate_size=3072,
+    )
+    cfg_path = Path(args.tokenizer_path) / "model_config.json"
+    if cfg_path.exists():
+        enc_cfg = ModelConfig(**json.loads(cfg_path.read_text(encoding="utf-8")))
+        enc_cfg.max_position_embeddings = args.max_input_len
+
+    dec_cfg = DecoderConfig(
+        vocab_size=tokenizer.vocab_size,
+        hidden_size=512,
+        num_layers=4,
+        num_attention_heads=8,
+        intermediate_size=2048,
+        max_position_embeddings=args.max_target_len + 8,
+        dropout=0.1,
+    )
+
+    if args.decoder_variant == "hybrid":
+        model = GenerativeQAModelHybrid(enc_cfg, dec_cfg).to(device)
+    else:
+        model = StandardGenerativeQAModel(enc_cfg, dec_cfg).to(device)
+
+    _ = load_encoder_from_pretrain(model, args.pretrain_ckpt)
+    if args.init_from_checkpoint:
+        init_step, init_best = load_model_from_gen_checkpoint(
+            model, args.init_from_checkpoint, decoder_variant=args.decoder_variant
+        )
+        print(f"Initialized from generative checkpoint: {args.init_from_checkpoint} (step={init_step}, best={init_best:.4f})")
+
+    encoder_params = []
+    decoder_params = []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if name.startswith("encoder."):
+            encoder_params.append(p)
+        else:
+            decoder_params.append(p)
+    optimizer = AdamW(
+        [
+            {"params": decoder_params, "lr": args.lr},
+            {"params": encoder_params, "lr": args.encoder_lr},
+        ],
 
 
+#         max_position_embeddings=args.max_target_len + 8,
+#         dropout=0.1,
+#     )
 # 
-#     return global_step, running_loss / max(1, len(train_loader))
+#     if args.decoder_variant == "hybrid":
+#         model = GenerativeQAModelHybrid(enc_cfg, dec_cfg).to(device)
+#     else:
+#         model = StandardGenerativeQAModel(enc_cfg, dec_cfg).to(device)
 # 
+#     _ = load_encoder_from_pretrain(model, args.pretrain_ckpt)
+#     if args.init_from_checkpoint:
+#         init_step, init_best = load_model_from_gen_checkpoint(
+#             model, args.init_from_checkpoint, decoder_variant=args.decoder_variant
+#         )
+#         print(f"Initialized from generative checkpoint: {args.init_from_checkpoint} (step={init_step}, best={init_best:.4f})")
 # 
-# def main():
-#     p = argparse.ArgumentParser()
-#     p.add_argument("--tokenizer_path", default="checkpoints_pretrain_base_seq256/step_20000")
-#     p.add_argument("--pretrain_ckpt", default="checkpoints_pretrain_base_seq256/step_20000/checkpoint.pt")
-#     p.add_argument("--init_from_checkpoint", default="")
-#     p.add_argument("--output_dir", default="checkpoints_generative_qa")
-#     p.add_argument("--max_input_len", type=int, default=256)
-#     p.add_argument("--max_target_len", type=int, default=48)
-#     p.add_argument("--train_batch_size", type=int, default=6)
-#     p.add_argument("--eval_batch_size", type=int, default=8)
-#     p.add_argument("--grad_accum", type=int, default=2)
-#     p.add_argument("--num_workers", type=int, default=4)
-#     p.add_argument("--epochs", type=int, default=6)
-#     p.add_argument("--lr", type=float, default=3e-4)
-#     p.add_argument("--encoder_lr", type=float, default=8e-5)
-#     p.add_argument("--weight_decay", type=float, default=0.01)
-#     p.add_argument("--warmup_ratio", type=float, default=0.06)
-#     p.add_argument("--max_grad_norm", type=float, default=1.0)
-#     p.add_argument("--label_smoothing", type=float, default=0.05)
-#     p.add_argument("--eval_every_epochs", type=int, default=1)
-#     p.add_argument("--save_every_epochs", type=int, default=1)
-#     p.add_argument("--resume_path", default="")
-#     p.add_argument("--seed", type=int, default=42)
-#     p.add_argument("--freeze_warmup_epochs", type=int, default=2)
-#     p.add_argument("--unfreeze_top_layers", type=int, default=4)
-#     p.add_argument("--no_squad_v2", action="store_true")
+#     encoder_params = []
+#     decoder_params = []
+#     for name, p in model.named_parameters():
+#         if not p.requires_grad:
+#             continue
+#         if name.startswith("encoder."):
+#             encoder_params.append(p)
+#         else:
+#             decoder_params.append(p)
+#     optimizer = AdamW(
+#         [
+#             {"params": decoder_params, "lr": args.lr},
+#             {"params": encoder_params, "lr": args.encoder_lr},
+#         ],
