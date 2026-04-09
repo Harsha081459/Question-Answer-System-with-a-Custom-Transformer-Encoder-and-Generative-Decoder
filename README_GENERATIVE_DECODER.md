@@ -47,35 +47,85 @@ python generative_finetuning.py \
 ```bash
 python generative_finetuning.py \
   --tokenizer_path checkpoints_pretrain_base_seq256/step_20000 \
+  --pretrain_ckpt checkpoints_pretrain_base_seq256/step_20000/checkpoint.pt \
+  --init_from_checkpoint checkpoints_generative_qa_stageA_v1/best.pt \
+  --output_dir checkpoints_generative_qa_stageB_v1v2 \
+  --decoder_variant hybrid \
+  --answerable_repeat 2 \
+  --epochs 4 \
+  --train_batch_size 16 \
+  --eval_batch_size 8 \
+  --grad_accum 1 \
+  --lr 2.5e-4 \
+  --encoder_lr 5e-5 \
+  --freeze_warmup_epochs 0 \
+  --unfreeze_top_layers 4 \
+  --fp16
+```
+
+Monitor:
+```bash
+tail -f logs/generative_train_*.log
+nvidia-smi
+```
+
+## Evaluate
+```bash
+python generative_evaluation.py \
+  --checkpoint_path checkpoints_generative_qa/best.pt \
+  --tokenizer_path checkpoints_generative_qa \
+  --decoder_variant hybrid \
+  --max_input_len 256 \
+  --max_target_len 48 \
+  --eval_batch_size 8 \
+  --num_workers 4 \
+  --beam_size 4 \
+  --max_new_tokens 32 \
+  --length_penalty 1.0 \
+  --out_json checkpoints_generative_qa/generative_eval_metrics.json
+```
+
+## Gated no-answer calibration (recommended for SQuAD v2 style behavior)
+Tune a no-answer threshold on validation and save metrics:
+```bash
+python generative_evaluation.py \
+  --checkpoint_path checkpoints_generative_qa_stageE_tradeoff/best.pt \
+  --tokenizer_path checkpoints_generative_qa_stageE_tradeoff \
+  --decoder_variant hybrid \
+  --target_style sentence \
+  --no_answer_text "The context does not contain the answer." \
+  --instruction_prefix "Answer in one concise sentence based only on the context." \
+  --beam_size 5 \
+  --max_new_tokens 48 \
 
 
-# ```bash
-# chmod +x run_generative_finetuning_nohup.sh
-# ./run_generative_finetuning_nohup.sh
 # ```
 # 
-# ## High-impact training sequence (recommended)
-# 
-# ### Stage A: Curriculum on SQuAD v1 only (answerable behavior first)
+# ## Evaluate
 # ```bash
-# python generative_finetuning.py \
-#   --tokenizer_path checkpoints_pretrain_base_seq256/step_20000 \
-#   --pretrain_ckpt checkpoints_pretrain_base_seq256/step_20000/checkpoint.pt \
-#   --output_dir checkpoints_generative_qa_stageA_v1 \
+# python generative_evaluation.py \
+#   --checkpoint_path checkpoints_generative_qa/best.pt \
+#   --tokenizer_path checkpoints_generative_qa \
 #   --decoder_variant hybrid \
-#   --no_squad_v2 \
-#   --epochs 3 \
-#   --train_batch_size 16 \
+#   --max_input_len 256 \
+#   --max_target_len 48 \
 #   --eval_batch_size 8 \
-#   --grad_accum 1 \
-#   --lr 3e-4 \
-#   --encoder_lr 8e-5 \
-#   --freeze_warmup_epochs 1 \
-#   --unfreeze_top_layers 4 \
-#   --fp16
+#   --num_workers 4 \
+#   --beam_size 4 \
+#   --max_new_tokens 32 \
+#   --length_penalty 1.0 \
+#   --out_json checkpoints_generative_qa/generative_eval_metrics.json
 # ```
 # 
-# ### Stage B: Continue on SQuAD v1+v2 with answerable rebalancing
+# ## Gated no-answer calibration (recommended for SQuAD v2 style behavior)
+# Tune a no-answer threshold on validation and save metrics:
 # ```bash
-# python generative_finetuning.py \
-#   --tokenizer_path checkpoints_pretrain_base_seq256/step_20000 \
+# python generative_evaluation.py \
+#   --checkpoint_path checkpoints_generative_qa_stageE_tradeoff/best.pt \
+#   --tokenizer_path checkpoints_generative_qa_stageE_tradeoff \
+#   --decoder_variant hybrid \
+#   --target_style sentence \
+#   --no_answer_text "The context does not contain the answer." \
+#   --instruction_prefix "Answer in one concise sentence based only on the context." \
+#   --beam_size 5 \
+#   --max_new_tokens 48 \
