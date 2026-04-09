@@ -155,35 +155,114 @@ class GenerativeQAModelHybrid(nn.Module):
     def _causal_mask(self, length: int, device: torch.device) -> torch.Tensor:
         return torch.triu(torch.ones((length, length), dtype=torch.bool, device=device), diagonal=1)
 
+    def encode(
+        self,
+        encoder_input_ids: torch.Tensor,
+        encoder_token_type_ids: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        enc = self.encoder(encoder_input_ids, encoder_token_type_ids, encoder_attention_mask)
+        return self.enc_to_dec(enc)
+
+    def decode(
+        self,
+        memory: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+        decoder_input_ids: torch.Tensor,
+        decoder_attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        dec_inp = self.decoder_embeddings(decoder_input_ids)
+        tgt_mask = self._causal_mask(decoder_input_ids.size(1), decoder_input_ids.device)
+        tgt_key_padding_mask = decoder_attention_mask == 0
+        memory_key_padding_mask = encoder_attention_mask == 0
+
+        dec_out = self.decoder(
+            x=dec_inp,
+            memory=memory,
+            tgt_attn_mask=tgt_mask,
+            tgt_key_padding_mask=tgt_key_padding_mask,
+            memory_key_padding_mask=memory_key_padding_mask,
+        )
+        dec_out = self.final_ln(dec_out)
+        return self.lm_head(dec_out)
+
+    def forward(
+        self,
+        encoder_input_ids: torch.Tensor,
+        encoder_token_type_ids: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+        decoder_input_ids: torch.Tensor,
+        decoder_attention_mask: torch.Tensor,
+        labels: Optional[torch.Tensor] = None,
+        label_smoothing: float = 0.0,
+    ) -> dict:
+        memory = self.encode(encoder_input_ids, encoder_token_type_ids, encoder_attention_mask)
+        logits = self.decode(memory, encoder_attention_mask, decoder_input_ids, decoder_attention_mask)
+        out = {"logits": logits}
+        if labels is not None:
+            loss = F.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                labels.reshape(-1),
+                ignore_index=-100,
+                label_smoothing=label_smoothing,
+            )
+            out["loss"] = loss
+        return out
+
+    @torch.no_grad()
+    def sequence_logprob(
+        self,
+        encoder_input_ids: torch.Tensor,
+        encoder_token_type_ids: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+        target_ids: torch.Tensor,
+        pad_token_id: int,
+        normalize_by_length: bool = True,
+    ) -> torch.Tensor:
+        if target_ids.size(1) < 2:
+            return torch.zeros(target_ids.size(0), device=target_ids.device)
+
+        memory = self.encode(encoder_input_ids, encoder_token_type_ids, encoder_attention_mask)
+        dec_in = target_ids[:, :-1]
+        labels = target_ids[:, 1:]
+        dec_mask = (dec_in != pad_token_id).long()
+        logits = self.decode(memory, encoder_attention_mask, dec_in, dec_mask)
+        log_probs = F.log_softmax(logits, dim=-1)
+        token_logp = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+        valid = labels != pad_token_id
+        seq_logp = (token_logp * valid).sum(dim=1)
+        if not normalize_by_length:
+            return seq_logp
+        lengths = valid.sum(dim=1).clamp(min=1)
 
 
-#                 tgt_attn_mask=tgt_attn_mask,
-#                 tgt_key_padding_mask=tgt_key_padding_mask,
-#                 memory_key_padding_mask=memory_key_padding_mask,
+#                 label_smoothing=label_smoothing,
 #             )
-#         return x
+#             out["loss"] = loss
+#         return out
 # 
+#     @torch.no_grad()
+#     def sequence_logprob(
+#         self,
+#         encoder_input_ids: torch.Tensor,
+#         encoder_token_type_ids: torch.Tensor,
+#         encoder_attention_mask: torch.Tensor,
+#         target_ids: torch.Tensor,
+#         pad_token_id: int,
+#         normalize_by_length: bool = True,
+#     ) -> torch.Tensor:
+#         if target_ids.size(1) < 2:
+#             return torch.zeros(target_ids.size(0), device=target_ids.device)
 # 
-# class GenerativeQAModelHybrid(nn.Module):
-#     """Main generative QA model using the custom hybrid decoder stack."""
-# 
-#     def __init__(self, encoder_cfg: ModelConfig, decoder_cfg: DecoderConfig):
-#         super().__init__()
-#         self.encoder_cfg = encoder_cfg
-#         self.decoder_cfg = decoder_cfg
-#         self.encoder = BertEncoder(encoder_cfg)
-# 
-#         if encoder_cfg.hidden_size != decoder_cfg.hidden_size:
-#             self.enc_to_dec = nn.Linear(encoder_cfg.hidden_size, decoder_cfg.hidden_size)
-#         else:
-#             self.enc_to_dec = nn.Identity()
-# 
-#         self.decoder_embeddings = DecoderEmbeddings(decoder_cfg)
-#         self.decoder = HybridDecoderStack(decoder_cfg)
-#         self.final_ln = nn.LayerNorm(decoder_cfg.hidden_size, eps=decoder_cfg.layer_norm_eps)
-#         self.lm_head = nn.Linear(decoder_cfg.hidden_size, decoder_cfg.vocab_size, bias=False)
-#         self.lm_head.weight = self.decoder_embeddings.token_embeddings.weight
-# 
-#     def _causal_mask(self, length: int, device: torch.device) -> torch.Tensor:
-#         return torch.triu(torch.ones((length, length), dtype=torch.bool, device=device), diagonal=1)
-# 
+#         memory = self.encode(encoder_input_ids, encoder_token_type_ids, encoder_attention_mask)
+#         dec_in = target_ids[:, :-1]
+#         labels = target_ids[:, 1:]
+#         dec_mask = (dec_in != pad_token_id).long()
+#         logits = self.decode(memory, encoder_attention_mask, dec_in, dec_mask)
+#         log_probs = F.log_softmax(logits, dim=-1)
+#         token_logp = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+#         valid = labels != pad_token_id
+#         seq_logp = (token_logp * valid).sum(dim=1)
+#         if not normalize_by_length:
+#             return seq_logp
+#         lengths = valid.sum(dim=1).clamp(min=1)
