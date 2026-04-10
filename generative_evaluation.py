@@ -165,35 +165,119 @@ def evaluate_model(
                     encoder_token_type_ids=enc_ttype,
                     encoder_attention_mask=enc_mask,
                     bos_token_id=bos,
+                    eos_token_id=eos,
+                    pad_token_id=pad,
+                    max_new_tokens=max_new_tokens,
+                    beam_size=beam_size,
+                    length_penalty=length_penalty,
+                    return_logprob=True,
+                )
+                out_ids = out[0].tolist()
+                noans_logprob = model.sequence_logprob(
+                    encoder_input_ids=enc_ids,
+                    encoder_token_type_ids=enc_ttype,
+                    encoder_attention_mask=enc_mask,
+                    target_ids=noans_target_ids,
+                    pad_token_id=pad,
+                    normalize_by_length=True,
+                )[0].item()
+                score_diffs.append(noans_logprob - pred_logprob)
+            else:
+                out_ids = model.generate(
+                    encoder_input_ids=enc_ids,
+                    encoder_token_type_ids=enc_ttype,
+                    encoder_attention_mask=enc_mask,
+                    bos_token_id=bos,
+                    eos_token_id=eos,
+                    pad_token_id=pad,
+                    max_new_tokens=max_new_tokens,
+                    beam_size=beam_size,
+                    length_penalty=length_penalty,
+                )[0].tolist()
+
+            pred = _decode_generated_ids(tokenizer, out_ids, bos=bos, eos=eos, pad=pad)
+            gold = batch["target_text"][i].strip()
+            is_noans = normalize_text(gold) == normalize_text(no_answer_text)
+            raw_preds.append(pred)
+            golds.append(gold)
+            is_noans_flags.append(is_noans)
+            processed += 1
+        if stop_early and processed >= int(max_eval_examples):
+            break
+
+    selected_threshold = float(no_answer_threshold)
+    tuning_report = None
+    if tune_no_answer_threshold:
+        selected_threshold, tuning_report = _select_gate_threshold(
+            is_noans_flags=is_noans_flags,
+            score_diffs=score_diffs,
+            threshold_points=threshold_points,
+        )
+
+    preds = []
+    refs = []
+    ems = []
+    f1s = []
+    noans_correct = 0
+    noans_total = 0
+    ans_correct = 0
+    ans_total = 0
+    for idx, (raw_pred, gold, is_noans) in enumerate(zip(raw_preds, golds, is_noans_flags)):
+        if gate_active:
+            pred = no_answer_text if score_diffs[idx] > selected_threshold else raw_pred
+        else:
+            pred = raw_pred
+        preds.append(pred)
+        refs.append([gold])
+        ems.append(exact_match(pred, gold))
+        f1s.append(f1_score(pred, gold))
+
+        pred_noans = normalize_text(pred) == normalize_text(no_answer_text)
+        if is_noans:
+            noans_total += 1
+            if pred_noans:
+                noans_correct += 1
+        else:
+            ans_total += 1
+            if not pred_noans:
+                ans_correct += 1
+
+    rouge_res = rouge.compute(predictions=preds, references=[x[0] for x in refs])
+    bleu_res = bleu.compute(predictions=preds, references=refs)
+    metrics = {
+        "exact_match": 100.0 * sum(ems) / max(1, len(ems)),
+        "f1": 100.0 * sum(f1s) / max(1, len(f1s)),
+        "rougeL": 100.0 * rouge_res["rougeL"],
+        "bleu": 100.0 * bleu_res["bleu"],
 
 
-#         noans_target_ids = _build_target_ids(
-#             tokenizer=tokenizer,
-#             text=no_answer_text,
-#             bos=bos,
-#             eos=eos,
-#             max_new_tokens=max_new_tokens,
-#             device=device,
-#         )
+#     noans_total = 0
+#     ans_correct = 0
+#     ans_total = 0
+#     for idx, (raw_pred, gold, is_noans) in enumerate(zip(raw_preds, golds, is_noans_flags)):
+#         if gate_active:
+#             pred = no_answer_text if score_diffs[idx] > selected_threshold else raw_pred
+#         else:
+#             pred = raw_pred
+#         preds.append(pred)
+#         refs.append([gold])
+#         ems.append(exact_match(pred, gold))
+#         f1s.append(f1_score(pred, gold))
 # 
-#     raw_preds = []
-#     golds = []
-#     is_noans_flags = []
-#     score_diffs = []
+#         pred_noans = normalize_text(pred) == normalize_text(no_answer_text)
+#         if is_noans:
+#             noans_total += 1
+#             if pred_noans:
+#                 noans_correct += 1
+#         else:
+#             ans_total += 1
+#             if not pred_noans:
+#                 ans_correct += 1
 # 
-#     processed = 0
-#     stop_early = max_eval_examples is not None and int(max_eval_examples) > 0
-#     for batch in val_loader:
-#         bsz = batch["encoder_input_ids"].size(0)
-#         for i in range(bsz):
-#             if stop_early and processed >= int(max_eval_examples):
-#                 break
-#             enc_ids = batch["encoder_input_ids"][i : i + 1].to(device)
-#             enc_ttype = batch["encoder_token_type_ids"][i : i + 1].to(device)
-#             enc_mask = batch["encoder_attention_mask"][i : i + 1].to(device)
-#             if gate_active:
-#                 out, pred_logprob, _ = model.generate(
-#                     encoder_input_ids=enc_ids,
-#                     encoder_token_type_ids=enc_ttype,
-#                     encoder_attention_mask=enc_mask,
-#                     bos_token_id=bos,
+#     rouge_res = rouge.compute(predictions=preds, references=[x[0] for x in refs])
+#     bleu_res = bleu.compute(predictions=preds, references=refs)
+#     metrics = {
+#         "exact_match": 100.0 * sum(ems) / max(1, len(ems)),
+#         "f1": 100.0 * sum(f1s) / max(1, len(f1s)),
+#         "rougeL": 100.0 * rouge_res["rougeL"],
+#         "bleu": 100.0 * bleu_res["bleu"],
