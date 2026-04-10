@@ -75,35 +75,74 @@ def main():
         truncation=True,
         max_length=min(args.max_input_len, enc_cfg.max_position_embeddings),
         return_tensors="pt",
+    )
+    enc_ids = enc["input_ids"].to(device)
+    enc_mask = enc["attention_mask"].to(device)
+    enc_ttype = enc.get("token_type_ids", torch.zeros_like(enc_ids)).to(device)
+
+    bos = tok.cls_token_id if tok.cls_token_id is not None else tok.pad_token_id
+    eos = tok.sep_token_id if tok.sep_token_id is not None else tok.pad_token_id
+    pad = tok.pad_token_id
+
+    if args.enable_no_answer_gate:
+        out, pred_logprob, _ = model.generate(
+            encoder_input_ids=enc_ids,
+            encoder_token_type_ids=enc_ttype,
+            encoder_attention_mask=enc_mask,
+            bos_token_id=bos,
+            eos_token_id=eos,
+            pad_token_id=pad,
+            max_new_tokens=args.max_new_tokens,
+            beam_size=args.beam_size,
+            length_penalty=args.length_penalty,
+            return_logprob=True,
+        )
+        out_ids = out[0].tolist()
+    else:
+        out_ids = model.generate(
+            encoder_input_ids=enc_ids,
+            encoder_token_type_ids=enc_ttype,
+            encoder_attention_mask=enc_mask,
+            bos_token_id=bos,
+            eos_token_id=eos,
+            pad_token_id=pad,
+            max_new_tokens=args.max_new_tokens,
+            beam_size=args.beam_size,
+            length_penalty=args.length_penalty,
+        )[0].tolist()
+
+    raw_answer = decode_generated_ids(tok, out_ids, bos=bos, eos=eos, pad=pad)
+
+    output = {"question": args.question, "answer": raw_answer}
 
 
-#     seq = [bos] + ids + [eos]
-#     return torch.tensor([seq], dtype=torch.long, device=device)
-# 
-# 
-# def main():
-#     args = parse_args()
-#     payload = torch.load(args.checkpoint_path, map_location="cpu", weights_only=False)
-#     enc_cfg = ModelConfig(**payload["encoder_config"])
-#     dec_cfg = DecoderConfig(**payload["decoder_config"])
-#     if args.decoder_variant == "hybrid":
-#         model = GenerativeQAModelHybrid(enc_cfg, dec_cfg)
+#     if args.enable_no_answer_gate:
+#         out, pred_logprob, _ = model.generate(
+#             encoder_input_ids=enc_ids,
+#             encoder_token_type_ids=enc_ttype,
+#             encoder_attention_mask=enc_mask,
+#             bos_token_id=bos,
+#             eos_token_id=eos,
+#             pad_token_id=pad,
+#             max_new_tokens=args.max_new_tokens,
+#             beam_size=args.beam_size,
+#             length_penalty=args.length_penalty,
+#             return_logprob=True,
+#         )
+#         out_ids = out[0].tolist()
 #     else:
-#         model = StandardGenerativeQAModel(enc_cfg, dec_cfg)
-#     model.load_state_dict(payload["model"], strict=True)
+#         out_ids = model.generate(
+#             encoder_input_ids=enc_ids,
+#             encoder_token_type_ids=enc_ttype,
+#             encoder_attention_mask=enc_mask,
+#             bos_token_id=bos,
+#             eos_token_id=eos,
+#             pad_token_id=pad,
+#             max_new_tokens=args.max_new_tokens,
+#             beam_size=args.beam_size,
+#             length_penalty=args.length_penalty,
+#         )[0].tolist()
 # 
-#     device = "cuda" if torch.cuda.is_available() else "cpu"
-#     model.to(device).eval()
-#     tok = AutoTokenizer.from_pretrained(args.tokenizer_path, use_fast=True)
-#     if tok.pad_token is None:
-#         tok.pad_token = tok.sep_token
+#     raw_answer = decode_generated_ids(tok, out_ids, bos=bos, eos=eos, pad=pad)
 # 
-#     if args.instruction_prefix:
-#         inp = f"{args.instruction_prefix.strip()} question: {args.question} context: {args.context}"
-#     else:
-#         inp = f"question: {args.question} context: {args.context}"
-#     enc = tok(
-#         [inp],
-#         truncation=True,
-#         max_length=min(args.max_input_len, enc_cfg.max_position_embeddings),
-#         return_tensors="pt",
+#     output = {"question": args.question, "answer": raw_answer}
