@@ -15,6 +15,14 @@ nohup python generative_finetuning.py \
   --train_batch_size 6 \
   --eval_batch_size 8 \
   --grad_accum 2 \
+  --epochs 6 \
+  --lr 3e-4 \
+  --weight_decay 0.01 \
+  --warmup_ratio 0.06 \
+  --max_grad_norm 1.0 \
+  --label_smoothing 0.05 \
+  --freeze_warmup_epochs 2 \
+  --unfreeze_top_layers 4 \
 
 
 # #!/usr/bin/env bash
@@ -34,3 +42,11 @@ nohup python generative_finetuning.py \
 #   --train_batch_size 6 \
 #   --eval_batch_size 8 \
 #   --grad_accum 2 \
+#   --epochs 6 \
+#   --lr 3e-4 \
+#   --weight_decay 0.01 \
+#   --warmup_ratio 0.06 \
+#   --max_grad_norm 1.0 \
+#   --label_smoothing 0.05 \
+#   --freeze_warmup_epochs 2 \
+#   --unfreeze_top_layers 4 \
