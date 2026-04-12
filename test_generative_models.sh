@@ -14,6 +14,14 @@ models=(
 )
 
 for m in "${models[@]}"; do
+  echo "======================================"
+  echo "MODEL: $m"
+  
+  if [[ "$m" == *"stageC"* ]] || [[ "$m" == *"stageD"* ]]; then
+    prefix="--instruction_prefix \"Answer in one concise sentence based only on the context.\""
+  else
+    prefix=""
+  fi
 
 
 # #!/bin/bash
@@ -32,3 +40,11 @@ for m in "${models[@]}"; do
 # )
 # 
 # for m in "${models[@]}"; do
+#   echo "======================================"
+#   echo "MODEL: $m"
+#   
+#   if [[ "$m" == *"stageC"* ]] || [[ "$m" == *"stageD"* ]]; then
+#     prefix="--instruction_prefix \"Answer in one concise sentence based only on the context.\""
+#   else
+#     prefix=""
+#   fi
