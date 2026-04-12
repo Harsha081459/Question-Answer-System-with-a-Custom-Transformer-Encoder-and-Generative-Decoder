@@ -97,35 +97,84 @@ python generative_evaluation.py \
   --instruction_prefix "Answer in one concise sentence based only on the context." \
   --beam_size 5 \
   --max_new_tokens 48 \
+  --length_penalty 1.05 \
+  --tune_no_answer_threshold \
+  --threshold_points 101 \
+  --out_json checkpoints_generative_qa_stageE_tradeoff/generative_eval_metrics_gated.json
+```
+
+Use the tuned threshold at inference time:
+```bash
+python generative_inference.py \
+  --checkpoint_path checkpoints_generative_qa_stageE_tradeoff/best.pt \
+  --tokenizer_path checkpoints_generative_qa_stageE_tradeoff \
+  --decoder_variant hybrid \
+  --question "Who won the Nobel Peace Prize in 2023?" \
+  --context "Mars is the fourth planet from the Sun and is often called the Red Planet." \
+  --instruction_prefix "Answer in one concise sentence based only on the context." \
+  --enable_no_answer_gate \
+  --no_answer_text "The context does not contain the answer." \
+  --no_answer_threshold 0.0
+```
+
+## Inference
+```bash
+python generative_inference.py \
+  --checkpoint_path checkpoints_generative_qa/best.pt \
+  --tokenizer_path checkpoints_generative_qa \
+  --decoder_variant hybrid \
+  --question "When was Hyderabad founded?" \
+  --context "Hyderabad was founded in 1591 by Muhammad Quli Qutb Shah. It is the capital of Telangana." \
+  --max_input_len 256 \
+  --max_new_tokens 32 \
+  --beam_size 4 \
+  --length_penalty 1.0
+```
+
+```bash
+python generative_inference.py \
+  --checkpoint_path checkpoints_generative_qa/best.pt \
+  --tokenizer_path checkpoints_generative_qa \
+  --decoder_variant hybrid \
+  --question "What is the population of Hyderabad?" \
+  --context "Hyderabad was founded in 1591 by Muhammad Quli Qutb Shah. It is the capital of Telangana." \
+  --max_input_len 256 \
+  --max_new_tokens 32 \
+  --beam_size 4 \
+  --length_penalty 1.0
+```
+
+## Sentence-target continuation training (decoder learns full sentence answers)
+```bash
 
 
-# ```
 # 
-# ## Evaluate
+# ## Inference
 # ```bash
-# python generative_evaluation.py \
+# python generative_inference.py \
 #   --checkpoint_path checkpoints_generative_qa/best.pt \
 #   --tokenizer_path checkpoints_generative_qa \
 #   --decoder_variant hybrid \
+#   --question "When was Hyderabad founded?" \
+#   --context "Hyderabad was founded in 1591 by Muhammad Quli Qutb Shah. It is the capital of Telangana." \
 #   --max_input_len 256 \
-#   --max_target_len 48 \
-#   --eval_batch_size 8 \
-#   --num_workers 4 \
-#   --beam_size 4 \
 #   --max_new_tokens 32 \
-#   --length_penalty 1.0 \
-#   --out_json checkpoints_generative_qa/generative_eval_metrics.json
+#   --beam_size 4 \
+#   --length_penalty 1.0
 # ```
 # 
-# ## Gated no-answer calibration (recommended for SQuAD v2 style behavior)
-# Tune a no-answer threshold on validation and save metrics:
 # ```bash
-# python generative_evaluation.py \
-#   --checkpoint_path checkpoints_generative_qa_stageE_tradeoff/best.pt \
-#   --tokenizer_path checkpoints_generative_qa_stageE_tradeoff \
+# python generative_inference.py \
+#   --checkpoint_path checkpoints_generative_qa/best.pt \
+#   --tokenizer_path checkpoints_generative_qa \
 #   --decoder_variant hybrid \
-#   --target_style sentence \
-#   --no_answer_text "The context does not contain the answer." \
-#   --instruction_prefix "Answer in one concise sentence based only on the context." \
-#   --beam_size 5 \
-#   --max_new_tokens 48 \
+#   --question "What is the population of Hyderabad?" \
+#   --context "Hyderabad was founded in 1591 by Muhammad Quli Qutb Shah. It is the capital of Telangana." \
+#   --max_input_len 256 \
+#   --max_new_tokens 32 \
+#   --beam_size 4 \
+#   --length_penalty 1.0
+# ```
+# 
+# ## Sentence-target continuation training (decoder learns full sentence answers)
+# ```bash
