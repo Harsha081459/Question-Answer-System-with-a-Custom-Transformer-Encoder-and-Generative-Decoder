@@ -154,35 +154,113 @@ def run_model(spec: ModelRunSpec, dataset, args, device: str):
                     padding=True,
                     return_tensors="pt",
                 )
+                enc_ids = enc["input_ids"].to(device)
+                enc_mask = enc["attention_mask"].to(device)
+                enc_ttype = enc.get("token_type_ids", torch.zeros_like(enc_ids)).to(device)
+                out = model.generate(
+                    encoder_input_ids=enc_ids,
+                    encoder_token_type_ids=enc_ttype,
+                    encoder_attention_mask=enc_mask,
+                    bos_token_id=bos,
+                    eos_token_id=eos,
+                    pad_token_id=pad,
+                    max_new_tokens=args.max_new_tokens,
+                    beam_size=args.beam_size,
+                    length_penalty=args.length_penalty,
+                )
+                batch_preds.append(decode_custom(tokenizer, out[0].tolist(), bos=bos, eos=eos, pad=pad))
+        else:
+            enc = tokenizer(
+                inputs,
+                truncation=True,
+                max_length=args.max_input_len,
+                padding=True,
+                return_tensors="pt",
+            )
+            enc_ids = enc["input_ids"].to(device)
+            enc_mask = enc["attention_mask"].to(device)
+            out = model.generate(
+                input_ids=enc_ids,
+                attention_mask=enc_mask,
+                max_new_tokens=args.max_new_tokens,
+                num_beams=args.beam_size,
+                length_penalty=args.length_penalty,
+                early_stopping=True,
+            )
+            batch_preds = tokenizer.batch_decode(out, skip_special_tokens=True)
+            batch_preds = [x.strip() for x in batch_preds]
+
+        for pred, gold in zip(batch_preds, targets):
+            preds.append(pred)
+            golds.append(gold)
+            total_len += len(pred.split())
+
+    rouge = evaluate.load("rouge")
+    bleu = evaluate.load("bleu")
+    rouge_res = rouge.compute(predictions=preds, references=golds)
+    bleu_res = bleu.compute(predictions=preds, references=[[g] for g in golds])
+
+    ems = [exact_match(p, g) for p, g in zip(preds, golds)]
+    f1s = [f1_score(p, g) for p, g in zip(preds, golds)]
+
+    noans_total = sum(is_noans_flags)
+    ans_total = len(is_noans_flags) - noans_total
+    noans_correct = sum(
+        1 for p, is_noans in zip(preds, is_noans_flags) if is_noans and normalize_text(p) == normalize_text(args.no_answer_text)
+    )
+    ans_correct = sum(
+        1 for p, is_noans in zip(preds, is_noans_flags) if (not is_noans) and normalize_text(p) != normalize_text(args.no_answer_text)
+    )
+
+    return {
+        "name": spec.name,
+        "kind": spec.kind,
+        "model_ref": spec.ref,
+        "num_examples": len(dataset),
+        "exact_match": 100.0 * sum(ems) / max(1, len(ems)),
+        "f1": 100.0 * sum(f1s) / max(1, len(f1s)),
+        "rougeL": 100.0 * rouge_res["rougeL"],
+        "bleu": 100.0 * bleu_res["bleu"],
+        "no_answer_accuracy": 100.0 * noans_correct / max(1, noans_total),
+        "answerable_accuracy": 100.0 * ans_correct / max(1, ans_total),
+        "avg_output_len": total_len / max(1, len(preds)),
+        "sample_predictions": [
+            {"question": dataset[i]["question"], "gold": golds[i], "pred": preds[i]}
+            for i in range(min(5, len(preds)))
+        ],
+    }
 
 
-#     golds = []
-#     is_noans_flags = []
-#     total_len = 0
+def write_csv(path: Path, rows):
+
+
 # 
-#     bos = tokenizer.cls_token_id if tokenizer.cls_token_id is not None else tokenizer.bos_token_id
-#     eos = tokenizer.sep_token_id if tokenizer.sep_token_id is not None else tokenizer.eos_token_id
-#     pad = tokenizer.pad_token_id
+#     noans_total = sum(is_noans_flags)
+#     ans_total = len(is_noans_flags) - noans_total
+#     noans_correct = sum(
+#         1 for p, is_noans in zip(preds, is_noans_flags) if is_noans and normalize_text(p) == normalize_text(args.no_answer_text)
+#     )
+#     ans_correct = sum(
+#         1 for p, is_noans in zip(preds, is_noans_flags) if (not is_noans) and normalize_text(p) != normalize_text(args.no_answer_text)
+#     )
 # 
-#     for start in range(0, len(dataset), args.batch_size):
-#         batch = dataset.select(range(start, min(start + args.batch_size, len(dataset))))
-#         questions = [ex["question"] for ex in batch]
-#         contexts = [ex["context"] for ex in batch]
-#         targets = []
-#         inputs = [build_prompt(q, c, args.instruction_prefix) for q, c in zip(questions, contexts)]
-#         for ex in batch:
-#             ans = ex["answers"]["text"]
-#             gold = args.no_answer_text if len(ans) == 0 else ans[0].strip()
-#             targets.append(gold)
-#             is_noans_flags.append(len(ans) == 0)
+#     return {
+#         "name": spec.name,
+#         "kind": spec.kind,
+#         "model_ref": spec.ref,
+#         "num_examples": len(dataset),
+#         "exact_match": 100.0 * sum(ems) / max(1, len(ems)),
+#         "f1": 100.0 * sum(f1s) / max(1, len(f1s)),
+#         "rougeL": 100.0 * rouge_res["rougeL"],
+#         "bleu": 100.0 * bleu_res["bleu"],
+#         "no_answer_accuracy": 100.0 * noans_correct / max(1, noans_total),
+#         "answerable_accuracy": 100.0 * ans_correct / max(1, ans_total),
+#         "avg_output_len": total_len / max(1, len(preds)),
+#         "sample_predictions": [
+#             {"question": dataset[i]["question"], "gold": golds[i], "pred": preds[i]}
+#             for i in range(min(5, len(preds)))
+#         ],
+#     }
 # 
-#         if is_custom:
-#             batch_preds = []
-#             for inp in inputs:
-#                 enc = tokenizer(
-#                     [inp],
-#                     truncation=True,
-#                     max_length=args.max_input_len,
-#                     padding=True,
-#                     return_tensors="pt",
-#                 )
+# 
+# def write_csv(path: Path, rows):
