@@ -298,35 +298,103 @@ def main():
             {"params": decoder_params, "lr": args.lr},
             {"params": encoder_params, "lr": args.encoder_lr},
         ],
+        weight_decay=args.weight_decay,
+    )
+    total_updates = max(1, (len(train_loader) // args.grad_accum) * args.epochs)
+    warmup_steps = int(total_updates * args.warmup_ratio)
+    scheduler = make_scheduler(optimizer, warmup_steps, total_updates)
+    scaler = torch.cuda.amp.GradScaler(enabled=(device == "cuda" and args.fp16))
+    amp_enabled = device == "cuda" and (args.fp16 or args.bf16)
+    amp_dtype = torch.bfloat16 if args.bf16 else torch.float16
+
+    start_epoch = 0
+    global_step = 0
+    best_metric = -1e9
+    latest_path = os.path.join(args.output_dir, "latest.pt")
+    best_path = os.path.join(args.output_dir, "best.pt")
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    if args.resume_path:
+        global_step, start_epoch, best_metric = load_gen_checkpoint(
+            args.resume_path, model, optimizer, scheduler, scaler, device
+        )
+        print(f"Resumed from {args.resume_path} @step={global_step}, epoch={start_epoch}, best={best_metric:.4f}")
+
+    history = []
+    for epoch in range(start_epoch, args.epochs):
+        if epoch < args.freeze_warmup_epochs:
+            model.freeze_encoder()
+        elif epoch == args.freeze_warmup_epochs:
+            model.unfreeze_encoder_top_layers(args.unfreeze_top_layers)
+        else:
+            model.unfreeze_encoder_all()
+
+        global_step, train_loss = train_one_epoch(
+            model=model,
+            train_loader=train_loader,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler if (device == "cuda" and args.fp16) else None,
+            device=device,
+            grad_accum_steps=args.grad_accum,
+            max_grad_norm=args.max_grad_norm,
+            label_smoothing=args.label_smoothing,
+            global_step=global_step,
+            amp_dtype=amp_dtype,
+            amp_enabled=amp_enabled,
+        )
+
+        metrics = {}
+        if (epoch + 1) % args.eval_every_epochs == 0:
+            metrics = evaluate_model(
+                model=model,
+                tokenizer=tokenizer,
+                val_loader=val_loader,
+                device=device,
+                beam_size=4,
+                max_new_tokens=args.max_target_len,
+                length_penalty=1.0,
+                no_answer_text=args.no_answer_target_text,
+            )
+            score = metrics["f1"] + 0.25 * metrics["rougeL"]
+            if score > best_metric:
+                best_metric = score
+                save_gen_checkpoint(
+                    best_path,
+                    model,
+                    optimizer,
+                    scheduler,
+                    scaler if (device == "cuda" and args.fp16) else None,
+                    global_step,
+                    epoch + 1,
+                    best_metric,
+                    enc_cfg,
+                    dec_cfg,
+                )
+                print(f"[best] epoch={epoch+1} score={score:.4f}")
+
+        save_gen_checkpoint(
+            latest_path,
+            model,
+            optimizer,
+            scheduler,
+            scaler if (device == "cuda" and args.fp16) else None,
+            global_step,
+            epoch + 1,
+            best_metric,
+            enc_cfg,
+            dec_cfg,
+        )
+
+        row = {"epoch": epoch + 1, "train_loss": train_loss, **metrics}
+        history.append(row)
+        print(json.dumps(row, indent=2))
+
+    tokenizer.save_pretrained(args.output_dir)
+    with open(os.path.join(args.output_dir, "train_history.json"), "w", encoding="utf-8") as f:
+        json.dump(history, f, indent=2)
+    print(f"Training complete. Best checkpoint: {best_path}")
 
 
-#         max_position_embeddings=args.max_target_len + 8,
-#         dropout=0.1,
-#     )
-# 
-#     if args.decoder_variant == "hybrid":
-#         model = GenerativeQAModelHybrid(enc_cfg, dec_cfg).to(device)
-#     else:
-#         model = StandardGenerativeQAModel(enc_cfg, dec_cfg).to(device)
-# 
-#     _ = load_encoder_from_pretrain(model, args.pretrain_ckpt)
-#     if args.init_from_checkpoint:
-#         init_step, init_best = load_model_from_gen_checkpoint(
-#             model, args.init_from_checkpoint, decoder_variant=args.decoder_variant
-#         )
-#         print(f"Initialized from generative checkpoint: {args.init_from_checkpoint} (step={init_step}, best={init_best:.4f})")
-# 
-#     encoder_params = []
-#     decoder_params = []
-#     for name, p in model.named_parameters():
-#         if not p.requires_grad:
-#             continue
-#         if name.startswith("encoder."):
-#             encoder_params.append(p)
-#         else:
-#             decoder_params.append(p)
-#     optimizer = AdamW(
-#         [
-#             {"params": decoder_params, "lr": args.lr},
-#             {"params": encoder_params, "lr": args.encoder_lr},
-#         ],
+if __name__ == "__main__":
+    main()
