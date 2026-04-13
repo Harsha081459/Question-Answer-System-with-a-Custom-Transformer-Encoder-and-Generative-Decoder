@@ -214,35 +214,75 @@ def collate_generative(batch, tokenizer):
 
     tgt = []
     for x in batch:
+        ids = x["labels_ids"]
+        seq = [bos] + ids + [eos]
+        tgt.append(seq)
+    tgt_full = _pad_2d(tgt, pad)
+    dec_in = tgt_full[:, :-1]
+    labels = tgt_full[:, 1:].clone()
+    dec_attn = (dec_in != pad).long()
+    labels[labels == pad] = -100
+
+    return {
+        "encoder_input_ids": enc_ids,
+        "encoder_attention_mask": enc_attn,
+        "encoder_token_type_ids": enc_ttype,
+        "decoder_input_ids": dec_in,
+        "decoder_attention_mask": dec_attn,
+        "labels": labels,
+        "target_text": [x["target_text"] for x in batch],
+        "id": [x["id"] for x in batch],
+        "question": [x["question"] for x in batch],
+        "context": [x["context"] for x in batch],
+        "answers": [x["answers"] for x in batch],
+    }
 
 
-#         return model_inputs
-# 
-#     keep_cols = ["id", "question", "context", "answers"]
-#     tokenized = dataset.map(_tok, batched=True, remove_columns=[c for c in dataset.column_names if c not in keep_cols])
-#     return tokenized
-# 
-# 
-# def _pad_2d(seqs, pad_val: int):
-#     max_len = max(len(x) for x in seqs)
-#     out = torch.full((len(seqs), max_len), pad_val, dtype=torch.long)
-#     for i, x in enumerate(seqs):
-#         out[i, : len(x)] = torch.tensor(x, dtype=torch.long)
-#     return out
-# 
-# 
-# def collate_generative(batch, tokenizer):
-#     pad = tokenizer.pad_token_id
-#     bos = tokenizer.cls_token_id if tokenizer.cls_token_id is not None else tokenizer.bos_token_id
-#     eos = tokenizer.sep_token_id if tokenizer.sep_token_id is not None else tokenizer.eos_token_id
-#     if bos is None:
-#         bos = pad
-#     if eos is None:
-#         eos = pad
-# 
-#     enc_ids = _pad_2d([x["input_ids"] for x in batch], pad)
-#     enc_attn = _pad_2d([x["attention_mask"] for x in batch], 0)
-#     enc_ttype = torch.zeros_like(enc_ids)
-# 
-#     tgt = []
-#     for x in batch:
+def build_dataloaders(
+    cfg: GenQADataConfig,
+    train_batch_size: int,
+    eval_batch_size: int,
+    num_workers: int = 2,
+):
+    tokenizer = build_tokenizer(cfg.tokenizer_path)
+    train_ds, val_ds = load_train_val(
+        include_squad_v2=cfg.include_squad_v2,
+        answerable_repeat=cfg.answerable_repeat,
+        no_answer_repeat=cfg.no_answer_repeat,
+    )
+    train_tok = preprocess_dataset(
+        train_ds,
+        tokenizer,
+        cfg.max_input_len,
+        cfg.max_target_len,
+        target_style=cfg.target_style,
+        no_answer_target_text=cfg.no_answer_target_text,
+        instruction_prefix=cfg.instruction_prefix,
+    )
+    val_tok = preprocess_dataset(
+        val_ds,
+        tokenizer,
+        cfg.max_input_len,
+        cfg.max_target_len,
+        target_style=cfg.target_style,
+        no_answer_target_text=cfg.no_answer_target_text,
+        instruction_prefix=cfg.instruction_prefix,
+    )
+
+    train_loader = DataLoader(
+        train_tok,
+        batch_size=train_batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+        collate_fn=lambda b: collate_generative(b, tokenizer),
+    )
+    val_loader = DataLoader(
+        val_tok,
+        batch_size=eval_batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+        collate_fn=lambda b: collate_generative(b, tokenizer),
+    )
+    return tokenizer, train_loader, val_loader
