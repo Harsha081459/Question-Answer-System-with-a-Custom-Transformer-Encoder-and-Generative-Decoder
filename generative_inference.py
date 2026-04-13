@@ -114,35 +114,42 @@ def main():
     raw_answer = decode_generated_ids(tok, out_ids, bos=bos, eos=eos, pad=pad)
 
     output = {"question": args.question, "answer": raw_answer}
+    if args.enable_no_answer_gate:
+        noans_ids = build_target_ids(
+            tokenizer=tok,
+            text=args.no_answer_text,
+            bos=bos,
+            eos=eos,
+            max_new_tokens=args.max_new_tokens,
+            device=device,
+        )
+        noans_logprob = model.sequence_logprob(
+            encoder_input_ids=enc_ids,
+            encoder_token_type_ids=enc_ttype,
+            encoder_attention_mask=enc_mask,
+            target_ids=noans_ids,
+            pad_token_id=pad,
+            normalize_by_length=True,
+        )[0].item()
+        score_diff = noans_logprob - pred_logprob
+        gated = score_diff > args.no_answer_threshold
+        output = {
+            "question": args.question,
+            "answer": args.no_answer_text if gated else raw_answer,
+            "raw_answer": raw_answer,
+            "gate": {
+                "enabled": True,
+                "no_answer_text": args.no_answer_text,
+                "no_answer_threshold": args.no_answer_threshold,
+                "score_diff": score_diff,
+                "pred_avg_logprob": pred_logprob,
+                "no_answer_avg_logprob": noans_logprob,
+                "selected_no_answer": gated,
+            },
+        }
+
+    print(json.dumps(output, indent=2, ensure_ascii=False))
 
 
-#     if args.enable_no_answer_gate:
-#         out, pred_logprob, _ = model.generate(
-#             encoder_input_ids=enc_ids,
-#             encoder_token_type_ids=enc_ttype,
-#             encoder_attention_mask=enc_mask,
-#             bos_token_id=bos,
-#             eos_token_id=eos,
-#             pad_token_id=pad,
-#             max_new_tokens=args.max_new_tokens,
-#             beam_size=args.beam_size,
-#             length_penalty=args.length_penalty,
-#             return_logprob=True,
-#         )
-#         out_ids = out[0].tolist()
-#     else:
-#         out_ids = model.generate(
-#             encoder_input_ids=enc_ids,
-#             encoder_token_type_ids=enc_ttype,
-#             encoder_attention_mask=enc_mask,
-#             bos_token_id=bos,
-#             eos_token_id=eos,
-#             pad_token_id=pad,
-#             max_new_tokens=args.max_new_tokens,
-#             beam_size=args.beam_size,
-#             length_penalty=args.length_penalty,
-#         )[0].tolist()
-# 
-#     raw_answer = decode_generated_ids(tok, out_ids, bos=bos, eos=eos, pad=pad)
-# 
-#     output = {"question": args.question, "answer": raw_answer}
+if __name__ == "__main__":
+    main()
