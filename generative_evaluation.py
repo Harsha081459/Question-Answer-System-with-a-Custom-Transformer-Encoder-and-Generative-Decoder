@@ -249,35 +249,87 @@ def evaluate_model(
         "f1": 100.0 * sum(f1s) / max(1, len(f1s)),
         "rougeL": 100.0 * rouge_res["rougeL"],
         "bleu": 100.0 * bleu_res["bleu"],
+        "no_answer_accuracy": 100.0 * noans_correct / max(1, noans_total),
+        "answerable_accuracy": 100.0 * ans_correct / max(1, ans_total),
+        "num_examples": len(ems),
+        "gate_enabled": bool(gate_active),
+        "no_answer_threshold": float(selected_threshold) if gate_active else None,
+    }
+    if tuning_report is not None:
+        metrics["tuned_threshold_report"] = tuning_report
+    return metrics
 
 
-#     noans_total = 0
-#     ans_correct = 0
-#     ans_total = 0
-#     for idx, (raw_pred, gold, is_noans) in enumerate(zip(raw_preds, golds, is_noans_flags)):
-#         if gate_active:
-#             pred = no_answer_text if score_diffs[idx] > selected_threshold else raw_pred
-#         else:
-#             pred = raw_pred
-#         preds.append(pred)
-#         refs.append([gold])
-#         ems.append(exact_match(pred, gold))
-#         f1s.append(f1_score(pred, gold))
-# 
-#         pred_noans = normalize_text(pred) == normalize_text(no_answer_text)
-#         if is_noans:
-#             noans_total += 1
-#             if pred_noans:
-#                 noans_correct += 1
-#         else:
-#             ans_total += 1
-#             if not pred_noans:
-#                 ans_correct += 1
-# 
-#     rouge_res = rouge.compute(predictions=preds, references=[x[0] for x in refs])
-#     bleu_res = bleu.compute(predictions=preds, references=refs)
-#     metrics = {
-#         "exact_match": 100.0 * sum(ems) / max(1, len(ems)),
-#         "f1": 100.0 * sum(f1s) / max(1, len(f1s)),
-#         "rougeL": 100.0 * rouge_res["rougeL"],
-#         "bleu": 100.0 * bleu_res["bleu"],
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--checkpoint_path", required=True)
+    p.add_argument("--tokenizer_path", required=True)
+    p.add_argument("--max_input_len", type=int, default=256)
+    p.add_argument("--max_target_len", type=int, default=48)
+    p.add_argument("--eval_batch_size", type=int, default=8)
+    p.add_argument("--num_workers", type=int, default=2)
+    p.add_argument("--target_style", choices=["span", "sentence"], default="span")
+    p.add_argument("--no_answer_target_text", default=NO_ANSWER_TEXT)
+    p.add_argument("--instruction_prefix", default="")
+    p.add_argument("--decoder_variant", choices=["standard", "hybrid"], default="standard")
+    p.add_argument("--beam_size", type=int, default=4)
+    p.add_argument("--max_new_tokens", type=int, default=32)
+    p.add_argument("--length_penalty", type=float, default=1.0)
+    p.add_argument("--no_answer_text", default=NO_ANSWER_TEXT)
+    p.add_argument("--enable_no_answer_gate", action="store_true")
+    p.add_argument("--no_answer_threshold", type=float, default=0.0)
+    p.add_argument("--tune_no_answer_threshold", action="store_true")
+    p.add_argument("--threshold_points", type=int, default=101)
+    p.add_argument("--max_eval_examples", type=int, default=0)
+    p.add_argument("--out_json", default="generative_eval_metrics.json")
+    args = p.parse_args()
+
+    ckpt = torch.load(args.checkpoint_path, map_location="cpu", weights_only=False)
+    enc_cfg = ModelConfig(**ckpt["encoder_config"])
+    dec_cfg = DecoderConfig(**ckpt["decoder_config"])
+    if args.decoder_variant == "hybrid":
+        model = GenerativeQAModelHybrid(enc_cfg, dec_cfg)
+    else:
+        model = StandardGenerativeQAModel(enc_cfg, dec_cfg)
+    model.load_state_dict(ckpt["model"], strict=True)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+
+    cfg = GenQADataConfig(
+        tokenizer_path=args.tokenizer_path,
+        max_input_len=args.max_input_len,
+        max_target_len=args.max_target_len,
+        include_squad_v2=True,
+        target_style=args.target_style,
+        no_answer_target_text=args.no_answer_target_text,
+        instruction_prefix=args.instruction_prefix,
+    )
+    tokenizer, _, val_loader = build_dataloaders(
+        cfg=cfg,
+        train_batch_size=1,
+        eval_batch_size=args.eval_batch_size,
+        num_workers=args.num_workers,
+    )
+
+    metrics = evaluate_model(
+        model=model,
+        tokenizer=tokenizer,
+        val_loader=val_loader,
+        device=device,
+        beam_size=args.beam_size,
+        max_new_tokens=args.max_new_tokens,
+        length_penalty=args.length_penalty,
+        no_answer_text=args.no_answer_text,
+        enable_no_answer_gate=args.enable_no_answer_gate,
+        no_answer_threshold=args.no_answer_threshold,
+        tune_no_answer_threshold=args.tune_no_answer_threshold,
+        threshold_points=args.threshold_points,
+        max_eval_examples=args.max_eval_examples,
+    )
+    Path(args.out_json).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    print(json.dumps(metrics, indent=2))
+    print(f"Saved metrics to {args.out_json}")
+
+
+if __name__ == "__main__":
+    main()
