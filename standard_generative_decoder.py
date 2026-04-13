@@ -173,34 +173,61 @@ class GenerativeQAModel(nn.Module):
         memory = self.encode(encoder_input_ids, encoder_token_type_ids, encoder_attention_mask)
         beams = [(torch.tensor([[bos_token_id]], device=memory.device), 0.0, False)]
 
+        for _ in range(max_new_tokens):
+            candidates = []
+            for seq, score, ended in beams:
+                if ended:
+                    candidates.append((seq, score, True))
+                    continue
+                dec_attn = torch.ones_like(seq, device=seq.device)
+                logits = self.decode(memory, encoder_attention_mask, seq, dec_attn)[:, -1, :]
+                log_probs = F.log_softmax(logits, dim=-1)
+                topk = torch.topk(log_probs, k=beam_size, dim=-1)
+                for i in range(beam_size):
+                    tok = topk.indices[0, i].item()
+                    tok_logp = topk.values[0, i].item()
+                    new_seq = torch.cat([seq, torch.tensor([[tok]], device=seq.device)], dim=1)
+                    is_end = tok == eos_token_id
+                    candidates.append((new_seq, score + tok_logp, is_end))
 
-#         labels = target_ids[:, 1:]
-#         dec_mask = (dec_in != pad_token_id).long()
-#         logits = self.decode(memory, encoder_attention_mask, dec_in, dec_mask)
-#         log_probs = F.log_softmax(logits, dim=-1)
-#         token_logp = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
-#         valid = labels != pad_token_id
-#         seq_logp = (token_logp * valid).sum(dim=1)
-#         if not normalize_by_length:
-#             return seq_logp
-#         lengths = valid.sum(dim=1).clamp(min=1)
-#         return seq_logp / lengths
-# 
-#     @torch.no_grad()
-#     def generate(
-#         self,
-#         encoder_input_ids: torch.Tensor,
-#         encoder_token_type_ids: torch.Tensor,
-#         encoder_attention_mask: torch.Tensor,
-#         bos_token_id: int,
-#         eos_token_id: int,
-#         pad_token_id: int,
-#         max_new_tokens: int = 32,
-#         beam_size: int = 4,
-#         length_penalty: float = 1.0,
-#         return_logprob: bool = False,
-#     ):
-#         # Beam search for single-example inference
-#         assert encoder_input_ids.size(0) == 1, "generate currently supports batch size 1."
-#         memory = self.encode(encoder_input_ids, encoder_token_type_ids, encoder_attention_mask)
-#         beams = [(torch.tensor([[bos_token_id]], device=memory.device), 0.0, False)]
+            def norm_score(item):
+                seq, score, _ = item
+                denom = max(1.0, float(seq.size(1)) ** length_penalty)
+                return score / denom
+
+            candidates.sort(key=norm_score, reverse=True)
+            beams = candidates[:beam_size]
+            if all(x[2] for x in beams):
+                break
+
+        best_seq, best_score, _ = beams[0]
+        best_len = best_seq.size(1)
+        best = best_seq
+        if best_len < max_new_tokens + 1:
+            pad_len = max_new_tokens + 1 - best_len
+            best = torch.cat(
+                [best, torch.full((1, pad_len), pad_token_id, device=best.device, dtype=best.dtype)], dim=1
+            )
+        if return_logprob:
+            # score is sum log-probs for generated tokens (excluding BOS)
+            token_count = max(1, best_len - 1)
+            return best, float(best_score) / float(token_count), best_len
+        return best
+
+    def freeze_encoder(self) -> None:
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+
+    def unfreeze_encoder_top_layers(self, n_layers: int) -> None:
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+        n_layers = max(0, min(n_layers, len(self.encoder.layers)))
+        for layer in self.encoder.layers[-n_layers:]:
+            for p in layer.parameters():
+                p.requires_grad = True
+        for p in self.encoder.final_ln.parameters():
+            p.requires_grad = True
+
+    def unfreeze_encoder_all(self) -> None:
+        for p in self.encoder.parameters():
+            p.requires_grad = True
