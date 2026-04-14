@@ -146,35 +146,53 @@ python generative_inference.py \
 
 ## Sentence-target continuation training (decoder learns full sentence answers)
 ```bash
+python generative_finetuning.py \
+  --tokenizer_path checkpoints_pretrain_base_seq256/step_20000 \
+  --pretrain_ckpt checkpoints_pretrain_base_seq256/step_20000/checkpoint.pt \
+  --init_from_checkpoint checkpoints_generative_qa_stageB_v1v2_run1/best.pt \
+  --output_dir checkpoints_generative_qa_stageC_sentence \
+  --decoder_variant hybrid \
+  --target_style sentence \
+  --no_answer_target_text "The context does not contain the answer." \
+  --instruction_prefix "Answer in one concise sentence based only on the context." \
+  --answerable_repeat 2 \
+  --no_answer_repeat 1 \
+  --max_target_len 96 \
+  --epochs 2 \
+  --train_batch_size 16 \
+  --eval_batch_size 8 \
+  --grad_accum 1 \
+  --lr 1.5e-4 \
+  --encoder_lr 3e-5 \
+  --freeze_warmup_epochs 0 \
+  --unfreeze_top_layers 4 \
+  --fp16
+```
 
+## Stage D robustness tuning (recommended after Stage C)
+```bash
+python generative_finetuning.py \
+  --tokenizer_path checkpoints_pretrain_base_seq256/step_20000 \
+  --pretrain_ckpt checkpoints_pretrain_base_seq256/step_20000/checkpoint.pt \
+  --init_from_checkpoint checkpoints_generative_qa_stageC_sentence_run2/best.pt \
+  --output_dir checkpoints_generative_qa_stageD_balanced \
+  --decoder_variant hybrid \
+  --target_style sentence \
+  --no_answer_target_text "The context does not contain the answer." \
+  --instruction_prefix "Answer in one concise sentence based only on the context." \
+  --answerable_repeat 1 \
+  --no_answer_repeat 3 \
+  --max_target_len 96 \
+  --epochs 1 \
+  --train_batch_size 24 \
+  --eval_batch_size 12 \
+  --grad_accum 1 \
+  --lr 6e-5 \
+  --encoder_lr 1e-5 \
+  --freeze_warmup_epochs 0 \
+  --unfreeze_top_layers 6 \
+  --fp16
+```
 
-# 
-# ## Inference
-# ```bash
-# python generative_inference.py \
-#   --checkpoint_path checkpoints_generative_qa/best.pt \
-#   --tokenizer_path checkpoints_generative_qa \
-#   --decoder_variant hybrid \
-#   --question "When was Hyderabad founded?" \
-#   --context "Hyderabad was founded in 1591 by Muhammad Quli Qutb Shah. It is the capital of Telangana." \
-#   --max_input_len 256 \
-#   --max_new_tokens 32 \
-#   --beam_size 4 \
-#   --length_penalty 1.0
-# ```
-# 
-# ```bash
-# python generative_inference.py \
-#   --checkpoint_path checkpoints_generative_qa/best.pt \
-#   --tokenizer_path checkpoints_generative_qa \
-#   --decoder_variant hybrid \
-#   --question "What is the population of Hyderabad?" \
-#   --context "Hyderabad was founded in 1591 by Muhammad Quli Qutb Shah. It is the capital of Telangana." \
-#   --max_input_len 256 \
-#   --max_new_tokens 32 \
-#   --beam_size 4 \
-#   --length_penalty 1.0
-# ```
-# 
-# ## Sentence-target continuation training (decoder learns full sentence answers)
-# ```bash
+## Runtime expectation (RTX 4060 Ti)
+- 6 epochs with defaults: typically ~6 to 14 hours (depends on dataloader/network/cache)
