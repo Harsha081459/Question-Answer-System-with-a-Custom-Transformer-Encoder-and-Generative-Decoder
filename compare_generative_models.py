@@ -232,35 +232,82 @@ def run_model(spec: ModelRunSpec, dataset, args, device: str):
 
 
 def write_csv(path: Path, rows):
+    cols = [
+        "name",
+        "model_ref",
+        "exact_match",
+        "f1",
+        "rougeL",
+        "bleu",
+        "no_answer_accuracy",
+        "answerable_accuracy",
+        "avg_output_len",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            w.writerow({c: r.get(c) for c in cols})
 
 
-# 
-#     noans_total = sum(is_noans_flags)
-#     ans_total = len(is_noans_flags) - noans_total
-#     noans_correct = sum(
-#         1 for p, is_noans in zip(preds, is_noans_flags) if is_noans and normalize_text(p) == normalize_text(args.no_answer_text)
-#     )
-#     ans_correct = sum(
-#         1 for p, is_noans in zip(preds, is_noans_flags) if (not is_noans) and normalize_text(p) != normalize_text(args.no_answer_text)
-#     )
-# 
-#     return {
-#         "name": spec.name,
-#         "kind": spec.kind,
-#         "model_ref": spec.ref,
-#         "num_examples": len(dataset),
-#         "exact_match": 100.0 * sum(ems) / max(1, len(ems)),
-#         "f1": 100.0 * sum(f1s) / max(1, len(f1s)),
-#         "rougeL": 100.0 * rouge_res["rougeL"],
-#         "bleu": 100.0 * bleu_res["bleu"],
-#         "no_answer_accuracy": 100.0 * noans_correct / max(1, noans_total),
-#         "answerable_accuracy": 100.0 * ans_correct / max(1, ans_total),
-#         "avg_output_len": total_len / max(1, len(preds)),
-#         "sample_predictions": [
-#             {"question": dataset[i]["question"], "gold": golds[i], "pred": preds[i]}
-#             for i in range(min(5, len(preds)))
-#         ],
-#     }
-# 
-# 
-# def write_csv(path: Path, rows):
+def main():
+    args = parse_args()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Device: {device}")
+
+    dataset = load_eval_dataset(args.max_eval_examples)
+    specs = [
+        ModelRunSpec(
+            name=args.custom_name,
+            kind="custom",
+            ref=args.custom_checkpoint,
+            tokenizer_ref=args.custom_tokenizer,
+            decoder_variant="hybrid",
+        )
+    ]
+    for model_id in [m.strip() for m in args.hf_models.split(",") if m.strip()]:
+        specs.append(
+            ModelRunSpec(
+                name=model_id.replace("/", "_"),
+                kind="hf",
+                ref=model_id,
+                tokenizer_ref=model_id,
+            )
+        )
+
+    results = {
+        "dataset": "squad_v2_validation",
+        "num_examples": len(dataset),
+        "device": device,
+        "args": vars(args),
+        "models": [],
+    }
+
+    for spec in specs:
+        print(f"[run] {spec.name} ({spec.ref})")
+        try:
+            res = run_model(spec, dataset, args, device)
+            res["status"] = "ok"
+            print(json.dumps(res, indent=2))
+        except Exception as e:
+            res = {"name": spec.name, "model_ref": spec.ref, "status": "error", "error": str(e)}
+            print(f"[error] {spec.name}: {e}")
+        results["models"].append(res)
+
+    ok_rows = [r for r in results["models"] if r.get("status") == "ok"]
+    ranked = sorted(ok_rows, key=lambda x: x["f1"], reverse=True)
+    results["ranking_by_f1"] = [
+        {"rank": i + 1, "name": r["name"], "f1": r["f1"], "exact_match": r["exact_match"]}
+        for i, r in enumerate(ranked)
+    ]
+
+    Path(args.output_json).write_text(json.dumps(results, indent=2), encoding="utf-8")
+    write_csv(Path(args.output_csv), ok_rows)
+    print(f"Saved JSON: {args.output_json}")
+    print(f"Saved CSV: {args.output_csv}")
+    if ranked:
+        print(f"Top model: {ranked[0]['name']} | F1={ranked[0]['f1']:.2f} | EM={ranked[0]['exact_match']:.2f}")
+
+
+if __name__ == "__main__":
+    main()
