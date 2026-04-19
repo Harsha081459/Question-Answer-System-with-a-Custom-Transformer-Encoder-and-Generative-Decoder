@@ -155,35 +155,193 @@ pre-norm residual:
     hallucination.
     \item \textbf{Feed-forward network.} A two-layer FFN (hidden dim
     2048, GELU) refines the attended representation before the
+    next layer.
+\end{enumerate}
+
+Token generation is initiated with a \texttt{[BOS]} token and
+terminated by \texttt{[EOS]} or the \texttt{max\_new\_tokens=12}
+hard cap, whichever comes first. Decoding uses beam search
+(\texttt{beam=4}) with a length penalty of 1.0 to discourage
+unnecessarily short outputs.
+
+\subsection{No-Answer Gating}
+Both heads implement a no-answer abstention mechanism, but using
+different signals. The extractive head uses a threshold on the
+\texttt{[CLS]} logit margin, while the generative head compares the
+token-level log-probability of the generated sequence against the
+log-probability of a fixed no-answer template string
+(\textit{``unanswerable''}). If the template scores higher by a
+tuned margin $\delta$, the model outputs \textit{``Context has no
+answer''} rather than a generated span.
+
+\subsection{Design Rationale}
+The decision to share a single encoder across both heads rather than
+training two separate models offered three concrete advantages. First,
+it halved the pretraining compute required to obtain a strong
+contextual representation. Second, it enabled direct apples-to-apples
+comparison of extractive and generative decoding strategies on
+identical encoder representations. Third, the unified architecture
+made the demo deployment simpler: a single forward pass through the
+encoder feeds both heads, and the user can switch between modes
+without reloading weights.
+
+The asymmetric width (768 encoder vs.\ 512 decoder) was a deliberate
+capacity trade-off. The encoder must model long bidirectional context
+over question-passage pairs of up to 256 tokens, requiring greater
+width. The decoder generates short answers (median 3--4 tokens in
+SQuAD), so a narrower 512-dimensional space is sufficient and reduces
+the decoder parameter count by roughly 40\% compared to a
+width-matched design.
+
+\begin{figure*}[!t]
+\centering
+\begin{tikzpicture}[
+    font=\scriptsize,
+    >=Latex,
+    box/.style={rounded corners=2.5pt, draw=black!45, very thick, align=center, inner sep=4pt, minimum height=12mm},
+    bar/.style={rounded corners=2.5pt, draw=black!70, fill=black!82, text=white, very thick, align=left, inner sep=4pt, minimum height=5mm, text width=0.96\textwidth},
+    main_arrow/.style={-Latex, ultra thick, draw=black!80},
+    branch_arrow/.style={-Latex, thick, draw=black!50, dashed},
+    final_arrow/.style={-Latex, very thick, draw=black!70}
+]
+
+\node[bar] (s1) {\textbf{Stage 1 --- Example input \& preprocessing}};
+\node[box, fill=green!10, text width=0.22\textwidth, below=3mm of s1.south west, anchor=north west] (q) {\textbf{Question}\\ Who was the Norse leader?};
+\node[box, fill=green!10, text width=0.34\textwidth, right=5mm of q] (c) {\textbf{Context}\\ The Normans were descendants of Norse Vikings. Their leader was Rollo.};
+\node[box, fill=blue!10, text width=0.22\textwidth, right=5mm of c] (tok) {\textbf{Tokenizer}\\ {\small\texttt{input\_ids}}\\ {\small\texttt{token\_type\_ids}}\\ {\small\texttt{mask}}};
+\draw[main_arrow] (q.east) -- (c.west);
+\draw[main_arrow] (c.east) -- (tok.west);
+
+\node[bar, below=5mm of q.south west, anchor=north west] (s2) {\textbf{Stage 2 --- Shared encoder (main bottleneck)}};
+\node[box, fill=purple!15, draw=black!70, text width=0.92\textwidth, below=3mm of s2.south west, anchor=north west] (enc) {
+\textbf{Custom Transformer encoder (768-dim, 12-layer)}\\
+Embeddings: tokens $+$ positions $+$ segments\\
+$\times12$ layers: self-attention ($\times12$ heads) + FFN(3072)\\
+\textbf{Output:} $\mathbf{H} = [h_1, \ldots, h_L] \in \mathbb{R}^{L \times 768}$};
 
 
-# (SQuAD v2 no-answer instances), the score of the \texttt{[CLS]} token
-# logit serves as the null-answer score; if it exceeds the best span
-# score by a tuned threshold $\tau$, the model abstains.
+\node[bar, below=5mm of enc.south west, anchor=north west] (s3) {\textbf{Stage 3 --- Task-specific branching}};
+\node[box, fill=orange!15, text width=0.44\textwidth, below=3mm of s3.south west, anchor=north west] (ext) {
+\textbf{Extractive QA}\\
+{\small Linear span head}\\
+{\small Logits: $s_i, e_i$ per token}\\
+{\small n-best span search}\\
+\textbf{Output:} \texttt{Rollo}};
+\node[box, fill=cyan!15, text width=0.44\textwidth, right=8mm of ext] (gen) {
+\textbf{Generative QA}\\
+{\small Decoder (4 layers, 512-dim)}\\
+{\small Self-attn on prefix}\\
+{\small Cross-attn over } $\mathbf{H}$\\
+\textbf{Output:} \texttt{Rollo}};
+\draw[branch_arrow] (enc.south) -- ++(0,-2mm) -| (ext.north);
+\draw[branch_arrow] (enc.south) -- ++(0,-2mm) -| (gen.north);
+
+\node[bar, below=5mm of ext.south west, anchor=north west] (s4) {\textbf{Stage 4 --- Final answer selection}};
+\node[box, fill=gray!15, text width=0.92\textwidth, below=3mm of s4.south west, anchor=north west] (out) {
+\textbf{Final answer (same or different per QA mode)}\\
+{\small Extractive:} \texttt{Rollo} (span from passage) \quad {\small Generative:} \texttt{Rollo} (generated) \quad {\small No-answer:} \texttt{Context has no answer}};
+
+\end{tikzpicture}
+\caption{System architecture.}
+\end{figure*}
+
+
+\begin{figure*}[htbp]
+\centering
+\hspace{-2cm}
+\begin{tikzpicture}[
+    font=\sffamily\scriptsize,
+    >=Latex,
+    enc/.style={
+        rounded corners=3pt, draw=green!70!black, thick, fill=green!8,
+        align=center, inner sep=5pt,
+        minimum width=2.4cm, minimum height=1.5cm, text width=2.2cm},
+    dec/.style={
+        rounded corners=3pt, draw=blue!70!black, thick, fill=blue!8,
+        align=center, inner sep=5pt,
+        minimum width=2.4cm, minimum height=1.5cm, text width=2.2cm},
+    side/.style={
+        rounded corners=3pt, draw=black!55, thick, fill=#1!10,
+        align=center, inner sep=5pt,
+        minimum width=3.0cm, text width=2.8cm},
+    bar/.style={
+        rounded corners=2pt, draw=black!80, fill=black!82, text=white,
+        thick, align=center, inner sep=5pt, minimum width=16.8cm},
+    arr/.style={-Latex, thick, draw=black!60},
+    darr/.style={-Latex, thick, draw=black!50, dashed}
+]
+
+%% ══════════════════════════════ ENCODER ══════════════════════════════
+\hspace{-0.5cm}
+\node[bar, xshift=-5cm] (enc_bar)
+{\textbf{Encoder: custom BERT-style stack}};
+
+%% Five encoder nodes – centred within the bar (chain spans ≈14 cm)
+\node[enc, below=7mm of enc_bar, xshift=-6cm] (enc_in)
+    {\textbf{Input Pair}\\[1pt]
+     Q + Context\\\texttt{input\_ids}\\\texttt{type\_ids, mask}};
+\node[enc, right=8mm of enc_in] (enc_emb)
+    {\textbf{Embeddings}\\[1pt]
+     Token + Position\\+ Segment\\LN + Dropout};
+\node[enc, right=8mm of enc_emb] (enc_blk)
+    {\textbf{12 Transformer}\\Blocks\\Pre-norm, 12h\\FFN 3072, $d$=768};
+\node[enc, right=8mm of enc_blk] (enc_ln)
+    {\textbf{Final}\\[1pt]LayerNorm};
+\node[enc, right=8mm of enc_ln] (enc_out)
+    {\textbf{Contextual}\\States\\$L\times768$};
+
+\draw[arr] (enc_in)  -- (enc_emb);
+\draw[arr] (enc_emb) -- (enc_blk);
+\draw[arr] (enc_blk) -- (enc_ln);
+\draw[arr] (enc_ln)  -- (enc_out);
+
+%% ══════════════════════════════ BRANCHES ══════════════════════════════
+%% Positioned at fixed offsets from enc_bar.south – stays inside the bar
+\node[side=orange] (ext) at ($(enc_bar.south)+(-3.0cm,-4cm)$)
+    {\textbf{Extractive QA Head}\\[3pt]
+     Linear($768\!\to\!2$)\\on encoder states\\Start / End logits};
+\hspace{1cm}
+\node[side=gray] (bridge) at ($(enc_bar.south)+(+5.0cm,-4cm)$)
+    {\textbf{Enc–Dec Bridge}\\[3pt]
+     Linear($768\!\to\!512$)\\projection};
+
+%% Dashed branch arrows from enc_out → both branch nodes
+\draw[darr] (enc_out.south) -- ++(0,-4mm) -| (ext.north)
+    node[pos=0.10, above, font=\sffamily\tiny]{branch};
+\draw[darr] (enc_out.south) -- ++(0,-4mm) -| (bridge.north)
+    node[pos=0.10, above, font=\sffamily\tiny]{branch};
+
+%% ══════════════════════════════ DECODER ══════════════════════════════
+\hspace*{2cm}
+
+
+# \node[enc, right=8mm of enc_emb] (enc_blk)
+#     {\textbf{12 Transformer}\\Blocks\\Pre-norm, 12h\\FFN 3072, $d$=768};
+# \node[enc, right=8mm of enc_blk] (enc_ln)
+#     {\textbf{Final}\\[1pt]LayerNorm};
+# \node[enc, right=8mm of enc_ln] (enc_out)
+#     {\textbf{Contextual}\\States\\$L\times768$};
 # 
-# \subsection{Encoder--Decoder Bridge}
-# Because the encoder operates in a 768-dimensional space while the
-# decoder uses a 512-dimensional space, a learned linear projection
-# $\mathbf{W}_{\text{bridge}} \in \mathbb{R}^{768 \times 512}$ maps
-# the full encoder memory $\mathbf{H}$ into the decoder's key--value
-# space before each cross-attention layer. This projection is trained
-# jointly with the decoder and allows the two modules to operate at
-# different widths without any information bottleneck beyond what
-# the linear map can express.
+# \draw[arr] (enc_in)  -- (enc_emb);
+# \draw[arr] (enc_emb) -- (enc_blk);
+# \draw[arr] (enc_blk) -- (enc_ln);
+# \draw[arr] (enc_ln)  -- (enc_out);
 # 
-# \subsection{Generative Decoder}
-# The generative decoder is a 4-layer autoregressive Transformer with
-# hidden dimension 512 and 8 attention heads ($d_k = d_v = 64$). Each
-# decoder block applies three sub-layers in sequence, each wrapped in a
-# pre-norm residual:
+# %% ══════════════════════════════ BRANCHES ══════════════════════════════
+# %% Positioned at fixed offsets from enc_bar.south – stays inside the bar
+# \node[side=orange] (ext) at ($(enc_bar.south)+(-3.0cm,-4cm)$)
+#     {\textbf{Extractive QA Head}\\[3pt]
+#      Linear($768\!\to\!2$)\\on encoder states\\Start / End logits};
+# \hspace{1cm}
+# \node[side=gray] (bridge) at ($(enc_bar.south)+(+5.0cm,-4cm)$)
+#     {\textbf{Enc–Dec Bridge}\\[3pt]
+#      Linear($768\!\to\!512$)\\projection};
 # 
-# \begin{enumerate}[leftmargin=1.2em,noitemsep,topsep=2pt]
-#     \item \textbf{Masked self-attention.} Attends over all previously
-#     generated tokens using a causal mask, building up a
-#     representation of the partial answer prefix.
-#     \item \textbf{Cross-attention.} Queries the projected encoder
-#     memory $\mathbf{W}_{\text{bridge}}\mathbf{H}$ to ground each
-#     decoding step in the source context, directly suppressing
-#     hallucination.
-#     \item \textbf{Feed-forward network.} A two-layer FFN (hidden dim
-#     2048, GELU) refines the attended representation before the
+# %% Dashed branch arrows from enc_out → both branch nodes
+# \draw[darr] (enc_out.south) -- ++(0,-4mm) -| (ext.north)
+#     node[pos=0.10, above, font=\sffamily\tiny]{branch};
+# \draw[darr] (enc_out.south) -- ++(0,-4mm) -| (bridge.north)
+#     node[pos=0.10, above, font=\sffamily\tiny]{branch};
+# 
+# %% ══════════════════════════════ DECODER ══════════════════════════════
+# \hspace*{2cm}
