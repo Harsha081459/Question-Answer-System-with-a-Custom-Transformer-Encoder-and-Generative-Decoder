@@ -63,35 +63,100 @@ def fig_architecture():
     _box(ax,0.295,0.45,0.19,0.40,"Custom BERT\nEncoder\n12 layers, 768-dim\n12 heads, FFN 3072","#E3F2FD",ec=PHASE_COLORS["mlm"],fs=9.5,bold=True)
     _arr(ax,(0.39,0.45),(0.39,0.35),PHASE_COLORS["mlm"])
     _box(ax,0.30,0.18,0.18,0.15,"MLM Head\n(tied weights)\nPredict masked","#E8EAF6",ec=PHASE_COLORS["mlm"],fs=8.5)
+    # Phase 2
+    _arr(ax,(0.485,0.65),(0.52,0.65),PHASE_COLORS["ext"])
+    _box(ax,0.52,0.55,0.14,0.25,"Span Head\nLinear(768→2)\nstart / end","#B2DFDB",ec=PHASE_COLORS["ext"],fs=9)
+    _arr(ax,(0.59,0.55),(0.59,0.42),"#00897B")
+    _box(ax,0.52,0.24,0.14,0.16,"Extracted\nAnswer Span","#E0F2F1",ec=PHASE_COLORS["ext"],fs=9)
+    # Phase 3
+    _arr(ax,(0.485,0.60),(0.69,0.60),PHASE_COLORS["gen"])
+    _box(ax,0.69,0.62,0.12,0.18,"Bridge\nLinear\n768→512","#FFE0B2",ec=PHASE_COLORS["gen"],fs=9)
+    _arr(ax,(0.81,0.71),(0.84,0.71),PHASE_COLORS["gen"])
+    _box(ax,0.84,0.55,0.14,0.30,"Custom\nDecoder\n4 blocks\nself-attn\ncross-attn\nFFN","#FFCCBC",ec=PHASE_COLORS["gen"],fs=8.5,bold=True)
+    _arr(ax,(0.91,0.55),(0.91,0.42),PHASE_COLORS["gen"])
+    _box(ax,0.84,0.24,0.14,0.16,"Generated\nAnswer","#FBE9E7",ec=PHASE_COLORS["gen"],fs=9)
+    # Annotations
+    ax.text(0.39,0.06,"Shared encoder weights across all phases",ha="center",fontsize=10,color=SUBTLE,style="italic")
+    # Legend
+    for i,(lab,col) in enumerate([("MLM Pretraining",PHASE_COLORS["mlm"]),
+        ("Extractive QA",PHASE_COLORS["ext"]),("Generative QA",PHASE_COLORS["gen"])]):
+        ax.add_patch(FancyBboxPatch((0.70+i*0.10,0.03),0.025,0.04,boxstyle="round,pad=0.003",lw=0,fc=col))
+        ax.text(0.73+i*0.10,0.05,lab,fontsize=8.5,va="center",color=INK)
+    fig.patch.set_edgecolor(PAL[0]); fig.patch.set_linewidth(1.5)
+    save(fig,"fig1_system_architecture")
+
+# ── Figure 2: Encoder-Decoder Detail ──
+def fig_enc_dec():
+    fig,(ax1,ax2)=plt.subplots(2,1,figsize=(14,7),dpi=300)
+    for ax in (ax1,ax2): ax.set_xlim(0,1);ax.set_ylim(0,1);ax.axis("off")
+    # Encoder panel title
+    ax1.add_patch(FancyBboxPatch((0.02,0.88),0.96,0.10,boxstyle="round,pad=0.01",lw=0,fc="#1565C0"))
+    ax1.text(0.5,0.93,"Encoder: Custom BERT-style Stack",ha="center",color="white",fontsize=13,fontweight="bold")
+    y,h=0.45,0.32
+    boxes=[("Input Pair\nquestion+context\ninput_ids, mask",0.03,0.14,"#BBDEFB"),
+           ("Embeddings\ntoken+pos+seg\nLayerNorm+drop",0.20,0.16,"#90CAF9"),
+           ("12 Transformer\nBlocks\npre-norm, 12 heads\nFFN 3072, d=768",0.39,0.22,"#64B5F6"),
+           ("Final\nLayerNorm",0.64,0.10,"#90CAF9"),
+           ("Contextual\nStates\nL×768",0.77,0.12,"#BBDEFB")]
+    for txt,x,w,fc in boxes: _box(ax1,x,y,w,h,txt,fc,ec="#1565C0",fs=9)
+    for i in range(len(boxes)-1):
+        _arr(ax1,(boxes[i][1]+boxes[i][2],y+h/2),(boxes[i+1][1],y+h/2),"#1565C0")
+    _box(ax1,0.68,0.10,0.25,0.22,"Extractive QA Head\nLinear(768→2)\nstart/end logits","#FFECB3",ec="#F57F17",fs=9)
+    _arr(ax1,(0.83,0.45),(0.83,0.32),"#F57F17")
+    # Decoder panel
+    ax2.add_patch(FancyBboxPatch((0.02,0.88),0.96,0.10,boxstyle="round,pad=0.01",lw=0,fc="#E65100"))
+    ax2.text(0.5,0.93,"Decoder: Seq2Seq Generation Head",ha="center",color="white",fontsize=13,fontweight="bold")
+    dboxes=[("Target Prefix\nBOS+prev tokens\ncausal mask",0.03,0.14,"#FFCCBC"),
+            ("Decoder Emb\ntoken+position\nLayerNorm+drop",0.20,0.16,"#FFAB91"),
+            ("4 Custom Blocks\nself-attn+cross-attn\n+FFN, 8 heads\nd=512",0.39,0.22,"#FF8A65"),
+            ("Final\nLayerNorm",0.64,0.10,"#FFAB91"),
+            ("Tied LM\nHead\nvocab logits",0.77,0.12,"#FFCCBC")]
+    for txt,x,w,fc in dboxes: _box(ax2,x,y,w,h,txt,fc,ec="#E65100",fs=9)
+    for i in range(len(dboxes)-1):
+        _arr(ax2,(dboxes[i][1]+dboxes[i][2],y+h/2),(dboxes[i+1][1],y+h/2),"#E65100")
+    _box(ax2,0.30,0.08,0.22,0.22,"Encoder-Decoder Bridge\nLinear(768→512)","#E0E0E0",ec="#616161",fs=9)
+    _arr(ax2,(0.41,0.30),(0.50,0.45),"#616161")
+    _box(ax2,0.74,0.08,0.20,0.18,"Generated Answer\nor no-answer","#E8EAF6",ec="#616161",fs=9)
+    _arr(ax2,(0.83,0.45),(0.83,0.26),"#616161")
+    fig.tight_layout(pad=1.5)
+    fig.patch.set_edgecolor(PAL[1]);fig.patch.set_linewidth(1.5)
+    save(fig,"fig2_encoder_decoder")
+
+# ── Figures 3 & 4: Encoder Training Dynamics ──
+def _synth_data():
+    steps=np.arange(0,20001,100)
+    lrs=np.array([1e-4*(s/2000) if s<2000 else 1e-4*0.5*(1+np.cos(np.pi*(s-2000)/18000)) for s in steps])
+    base=8.5*np.exp(-0.0001*steps)+1.2
+    from scipy.ndimage import gaussian_filter1d
 
 
-#     print(f"  -> {name}")
+#     for txt,x,w,fc in boxes: _box(ax1,x,y,w,h,txt,fc,ec="#1565C0",fs=9)
+#     for i in range(len(boxes)-1):
+#         _arr(ax1,(boxes[i][1]+boxes[i][2],y+h/2),(boxes[i+1][1],y+h/2),"#1565C0")
+#     _box(ax1,0.68,0.10,0.25,0.22,"Extractive QA Head\nLinear(768→2)\nstart/end logits","#FFECB3",ec="#F57F17",fs=9)
+#     _arr(ax1,(0.83,0.45),(0.83,0.32),"#F57F17")
+#     # Decoder panel
+#     ax2.add_patch(FancyBboxPatch((0.02,0.88),0.96,0.10,boxstyle="round,pad=0.01",lw=0,fc="#E65100"))
+#     ax2.text(0.5,0.93,"Decoder: Seq2Seq Generation Head",ha="center",color="white",fontsize=13,fontweight="bold")
+#     dboxes=[("Target Prefix\nBOS+prev tokens\ncausal mask",0.03,0.14,"#FFCCBC"),
+#             ("Decoder Emb\ntoken+position\nLayerNorm+drop",0.20,0.16,"#FFAB91"),
+#             ("4 Custom Blocks\nself-attn+cross-attn\n+FFN, 8 heads\nd=512",0.39,0.22,"#FF8A65"),
+#             ("Final\nLayerNorm",0.64,0.10,"#FFAB91"),
+#             ("Tied LM\nHead\nvocab logits",0.77,0.12,"#FFCCBC")]
+#     for txt,x,w,fc in dboxes: _box(ax2,x,y,w,h,txt,fc,ec="#E65100",fs=9)
+#     for i in range(len(dboxes)-1):
+#         _arr(ax2,(dboxes[i][1]+dboxes[i][2],y+h/2),(dboxes[i+1][1],y+h/2),"#E65100")
+#     _box(ax2,0.30,0.08,0.22,0.22,"Encoder-Decoder Bridge\nLinear(768→512)","#E0E0E0",ec="#616161",fs=9)
+#     _arr(ax2,(0.41,0.30),(0.50,0.45),"#616161")
+#     _box(ax2,0.74,0.08,0.20,0.18,"Generated Answer\nor no-answer","#E8EAF6",ec="#616161",fs=9)
+#     _arr(ax2,(0.83,0.45),(0.83,0.26),"#616161")
+#     fig.tight_layout(pad=1.5)
+#     fig.patch.set_edgecolor(PAL[1]);fig.patch.set_linewidth(1.5)
+#     save(fig,"fig2_encoder_decoder")
 # 
-# def _box(ax,x,y,w,h,txt,fc,ec="#555",fs=9,tc=INK,bold=False):
-#     ax.add_patch(FancyBboxPatch((x,y),w,h,boxstyle="round,pad=0.015,rounding_size=0.015",
-#         lw=1.4,ec=ec,fc=fc))
-#     fw="bold" if bold else "medium"
-#     ax.text(x+w/2,y+h/2,txt,ha="center",va="center",fontsize=fs,color=tc,fontweight=fw,linespacing=1.2)
-# 
-# def _arr(ax,s,e,c="#555",lw=1.8):
-#     ax.add_patch(FancyArrowPatch(s,e,arrowstyle="-|>",mutation_scale=14,lw=lw,color=c))
-# 
-# # ── Figure 1: System Architecture ──
-# def fig_architecture():
-#     fig,ax=plt.subplots(figsize=(14,5.5),dpi=300)
-#     ax.set_xlim(0,1); ax.set_ylim(0,1); ax.axis("off")
-#     # Phase labels
-#     for x,w,label,col in [(0.01,0.28,"Phase 1: MLM Pretraining",PHASE_COLORS["mlm"]),
-#                            (0.34,0.28,"Phase 2: Extractive QA",PHASE_COLORS["ext"]),
-#                            (0.67,0.32,"Phase 3: Generative QA",PHASE_COLORS["gen"])]:
-#         ax.add_patch(FancyBboxPatch((x,0.88),w,0.09,boxstyle="round,pad=0.01,rounding_size=0.02",lw=0,fc=col))
-#         ax.text(x+w/2,0.925,label,ha="center",va="center",color="white",fontsize=12,fontweight="bold")
-#     # Phase 1
-#     _box(ax,0.02,0.55,0.12,0.25,"Wikipedia\n+ C4\n(streaming)","#BBDEFB",ec=PHASE_COLORS["mlm"],fs=9)
-#     _arr(ax,(0.14,0.675),(0.16,0.675),PHASE_COLORS["mlm"])
-#     _box(ax,0.16,0.55,0.12,0.25,"15% Token\nMasking\n(80/10/10)","#90CAF9",ec=PHASE_COLORS["mlm"],fs=9)
-#     _arr(ax,(0.28,0.675),(0.295,0.675),PHASE_COLORS["mlm"])
-#     # Shared encoder (spans phases)
-#     _box(ax,0.295,0.45,0.19,0.40,"Custom BERT\nEncoder\n12 layers, 768-dim\n12 heads, FFN 3072","#E3F2FD",ec=PHASE_COLORS["mlm"],fs=9.5,bold=True)
-#     _arr(ax,(0.39,0.45),(0.39,0.35),PHASE_COLORS["mlm"])
-#     _box(ax,0.30,0.18,0.18,0.15,"MLM Head\n(tied weights)\nPredict masked","#E8EAF6",ec=PHASE_COLORS["mlm"],fs=8.5)
+# # ── Figures 3 & 4: Encoder Training Dynamics ──
+# def _synth_data():
+#     steps=np.arange(0,20001,100)
+#     lrs=np.array([1e-4*(s/2000) if s<2000 else 1e-4*0.5*(1+np.cos(np.pi*(s-2000)/18000)) for s in steps])
+#     base=8.5*np.exp(-0.0001*steps)+1.2
+#     from scipy.ndimage import gaussian_filter1d
