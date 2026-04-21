@@ -313,35 +313,192 @@ $\times12$ layers: self-attention ($\times12$ heads) + FFN(3072)\\
 
 %% ══════════════════════════════ DECODER ══════════════════════════════
 \hspace*{2cm}
+\node[bar, below=7mm of ext.south] (dec_bar)
+    {\textbf{Decoder: seq2seq generation head}};
+
+%% Five decoder nodes – same xshift as encoder chain
+\node[dec, below=7mm of dec_bar, xshift=-6.0cm] (dec_in)
+    {\textbf{Target Prefix}\\[1pt]
+     BOS + prev tokens\\Causal mask};
+\node[dec, right=8mm of dec_in] (dec_emb)
+    {\textbf{Decoder Emb.}\\[1pt]
+     Token + Position\\LN + Dropout};
+\node[dec, right=8mm of dec_emb] (dec_blk)
+    {\textbf{4 Custom Blocks}\\[1pt]
+     Masked Self-Attn\\+ Cross-Attn\\+ FFN (8h, $d$=512)};
+\node[dec, right=8mm of dec_blk] (dec_ln)
+    {\textbf{Final}\\[1pt]LayerNorm};
+\node[dec, right=8mm of dec_ln] (dec_head)
+    {\textbf{Tied LM Head}\\[1pt]
+     Vocab logits};
+
+\draw[arr] (dec_in)  -- (dec_emb);
+\draw[arr] (dec_emb) -- (dec_blk);
+\draw[arr] (dec_blk) -- (dec_ln);
+\draw[arr] (dec_ln)  -- (dec_head);
+
+%% Bridge → dec_blk cross-attention:
+%% goes down 5 mm, then left to dec_blk.x, then down to dec_blk.north
+
+    node[pos=0.1, right, font=\sffamily\tiny]{};
+
+%% ══════════════════════════════ OUTPUT ══════════════════════════════
+\node[side=gray, below=8mm of dec_head] (gen_out)
+    {\textbf{Generative Output}\\[3pt]
+     Answer tokens or\\no-answer fallback};
+\draw[arr] (dec_head.south) -- (gen_out.north);
+
+\end{tikzpicture}
+\caption{Detailed encoder and decoder architecture.}
+\label{fig:encdec}
+\end{figure*}
+
+% ══════════════════════════════════════════════════════════════
+\newpage
+\section{Method}
+\subsection{Encoder Pretraining}
+The pipeline was grounded in a custom Transformer encoder pretrained from scratch using masked language modeling (MLM). 15\% of input tokens were randomly masked using the 80/10/10 replacement strategy, and the model learned to predict the original tokens from surrounding context. Pretraining used an interleaved stream of Wikipedia (70\%) and C4 (30\%) data.
+\subsection{Extractive Span Prediction}
+For extractive QA, the pretrained encoder was equipped with a linear head that predicted start and end logits for each token position. At inference time, the system searched over the top $n_{\text{best}}$ start/end pairs, validated spans against a maximum answer length constraint, and selected the highest-scoring valid span. For unanswerable questions, the CLS token logit was compared against the best span score via a tuned threshold.
+\subsection{Generative Decoder}
+The generative decoder was the main architectural contribution. Each of the four decoder blocks applied three operations in sequence:
+\begin{enumerate}[leftmargin=1.2em,noitemsep,topsep=2pt]
+    \item Pre-norm masked self-attention on the generated prefix.
+    \item Residual cross-attention over the projected encoder memory.
+    \item Feed-forward refinement with residual connection.
+\end{enumerate}
+This arrangement forced the decoder to stay anchored to the encoder's contextual evidence, reducing hallucination and sentence-copying behavior.
+\subsection{Decoding and No-Answer Gating}
+To produce concise outputs, we constrained decoding to greedy mode (\texttt{beam=1}), a strict \texttt{max\_new\_tokens=12} limit, and a length penalty of 0.4. For unanswerable questions, the system computed the log-probability of the generated answer and compared it against the log-probability of a fixed no-answer template. If the difference crossed a tuned threshold, the model abstained.
+\subsection{Loss Functions}
+We optimized three task-specific losses:
+\begin{equation}
+\mathcal{L}_{\text{MLM}} = - \sum_{i \in \mathcal{M}} \log p_{\theta}(x_i \mid x_{\setminus i}),
+\end{equation}
+where $\mathcal{M}$ is the masked-token set (15\%).
+\begin{equation}
+\mathcal{L}_{\text{ext}} = \frac{1}{2}\left[\mathrm{CE}(\hat{y}^{start}, y^{start}) + \mathrm{CE}(\hat{y}^{end}, y^{end})\right],
+\end{equation}
+for extractive start/end supervision.
+\begin{equation}
+\mathcal{L}_{\text{gen}} = \mathrm{CE}(\hat{y}_{1:T}, y_{1:T};\, \texttt{ignore\_index}=-100,\, \epsilon_{ls}),
+\end{equation}
+for teacher-forced autoregressive decoding with label smoothing $\epsilon_{ls} = 0.05$.
+% ══════════════════════════════════════════════════════════════
+\section{Experimental Setup}
+
+Training was conducted on an RTX 4060 Ti GPU with fp16 mixed precision to accommodate the memory requirements of Transformer pretraining within 8\,GB VRAM. This halved the activation memory footprint, allowing a batch size of 16 during the MLM pretraining phase while accelerating tensor core operations.
+
+We implemented a robust checkpointing strategy with \texttt{nohup} wrappers for uninterrupted background execution. The training loop managed \texttt{latest.pt} and \texttt{best.pt} pointers, enabling clean resume from the exact step if a job was interrupted. All experiments used seed 42 for reproducibility.
+
+Evaluation used the full 11,873-example validation set for final reported extractive metrics.
+
+\begin{table}[H]
+\centering
+\scriptsize
+\caption{Stage-wise training configuration.}
+\begin{tabularx}{\columnwidth}{@{}p{1.8cm}p{1.7cm}X@{}}
+\toprule
+\textbf{Stage} & \textbf{Parameter} & \textbf{Setting} \\
+\midrule
+\rowcolor{gray!8}
+\multirow{4}{*}{\parbox{1.8cm}{Stage 1:\\MLM Pre-\\training}} & Architecture & 12 layers, 768 hidden, 12 heads, FFN 3072 \\
+\rowcolor{gray!8}
+ & Batch / Accum & 16 / 8 (eff. 128) \\
+\rowcolor{gray!8}
+ & LR / Schedule & 1e-4, warmup 10\% + cosine decay \\
+\rowcolor{gray!8}
+ & Precision & fp16/bf16 mixed \\
+\midrule
+\multirow{3}{*}{\parbox{1.8cm}{Stage 2:\\Extractive\\QA}} & Epochs / LR & 3 / 5e-5 \\
+ & Max length & 256, doc stride 64 \\
+ & No-answer & CLS null threshold sweep \\
+\midrule
+\rowcolor{gray!8}
+\multirow{4}{*}{\parbox{1.8cm}{Stage 3:\\Generative\\QA}} & Decoder & 4 layers, 512 hidden, 8 heads \\
+\rowcolor{gray!8}
+ & Learning rates & 3e-4 decoder, 8e-5 encoder \\
+\rowcolor{gray!8}
+ & Label smoothing & $\epsilon = 0.05$ \\
+\rowcolor{gray!8}
+ & Inference & greedy, max 12 tokens, lp 0.4 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]
+\centering
+\scriptsize
+\caption{Datasets and evaluation metrics used at each stage.}
+\begin{tabularx}{\columnwidth}{@{}p{1.4cm}p{1.4cm}X p{1.6cm}@{}}
+\toprule
+\textbf{Stage} & \textbf{Dataset} & \textbf{Objective} & \textbf{Metrics} \\
+\midrule
+Pretrain & Wiki + C4 & Masked language modeling & MLM loss \\
+Extractive & SQuAD v2 & Start/end span prediction & EM, F1 \\
+Generative & SQuAD v2 & Token-by-token generation & EM, F1, ROUGE-L, BLEU \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ══════════════════════════════════════════════════════════════
+\section{Results}
+
+\subsection{Pretraining Dynamics}
+The custom encoder was pretrained for 20k steps on an interleaved Wikipedia and C4 stream. As shown in Figure~3, training converged smoothly without instability. The learning rate schedule executed a 2k-step linear warmup followed by linear decay, driving the MLM loss from $\sim$9.5 down to $\sim$2.3. Figure~4 confirms that validation perplexity followed this downward trajectory, reaching a final value of 5.15.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig3_pretraining_curves.png}
+\caption{Encoder pretraining dynamics. (a)~MLM loss exhibits stable decay over 20k steps. (b)~Learning rate schedule with linear warmup (0--2k) and linear decay.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig4_val_perplexity.png}
+\caption{Validation perplexity tracked over 20k pretraining steps, confirming stable generalization to unseen text (final perplexity: 5.15).}
+\end{figure}
+
+\subsection{Extractive QA Performance}
+The extractive evaluation on the full SQuAD v2 validation set validated the efficacy of our custom pretraining. While RoBERTa-base established the performance ceiling, our scratch-built encoder achieved an F1 of 58.2, surpassing DistilBERT and confirming that our custom pretraining yields a competitive span-selection representation.
+
+\begin{table}[H]
+\centering
+\scriptsize
+\caption{Extractive QA on full SQuAD v2 validation (11,873 examples).}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Model} & \textbf{EM} & \textbf{F1} \\
+\midrule
 
 
-# \node[enc, right=8mm of enc_emb] (enc_blk)
-#     {\textbf{12 Transformer}\\Blocks\\Pre-norm, 12h\\FFN 3072, $d$=768};
-# \node[enc, right=8mm of enc_blk] (enc_ln)
-#     {\textbf{Final}\\[1pt]LayerNorm};
-# \node[enc, right=8mm of enc_ln] (enc_out)
-#     {\textbf{Contextual}\\States\\$L\times768$};
 # 
-# \draw[arr] (enc_in)  -- (enc_emb);
-# \draw[arr] (enc_emb) -- (enc_blk);
-# \draw[arr] (enc_blk) -- (enc_ln);
-# \draw[arr] (enc_ln)  -- (enc_out);
+# % ══════════════════════════════════════════════════════════════
+# \section{Results}
 # 
-# %% ══════════════════════════════ BRANCHES ══════════════════════════════
-# %% Positioned at fixed offsets from enc_bar.south – stays inside the bar
-# \node[side=orange] (ext) at ($(enc_bar.south)+(-3.0cm,-4cm)$)
-#     {\textbf{Extractive QA Head}\\[3pt]
-#      Linear($768\!\to\!2$)\\on encoder states\\Start / End logits};
-# \hspace{1cm}
-# \node[side=gray] (bridge) at ($(enc_bar.south)+(+5.0cm,-4cm)$)
-#     {\textbf{Enc–Dec Bridge}\\[3pt]
-#      Linear($768\!\to\!512$)\\projection};
+# \subsection{Pretraining Dynamics}
+# The custom encoder was pretrained for 20k steps on an interleaved Wikipedia and C4 stream. As shown in Figure~3, training converged smoothly without instability. The learning rate schedule executed a 2k-step linear warmup followed by linear decay, driving the MLM loss from $\sim$9.5 down to $\sim$2.3. Figure~4 confirms that validation perplexity followed this downward trajectory, reaching a final value of 5.15.
 # 
-# %% Dashed branch arrows from enc_out → both branch nodes
-# \draw[darr] (enc_out.south) -- ++(0,-4mm) -| (ext.north)
-#     node[pos=0.10, above, font=\sffamily\tiny]{branch};
-# \draw[darr] (enc_out.south) -- ++(0,-4mm) -| (bridge.north)
-#     node[pos=0.10, above, font=\sffamily\tiny]{branch};
+# \begin{figure}[H]
+# \centering
+# \includegraphics[width=\columnwidth]{figures/fig3_pretraining_curves.png}
+# \caption{Encoder pretraining dynamics. (a)~MLM loss exhibits stable decay over 20k steps. (b)~Learning rate schedule with linear warmup (0--2k) and linear decay.}
+# \end{figure}
 # 
-# %% ══════════════════════════════ DECODER ══════════════════════════════
-# \hspace*{2cm}
+# \begin{figure}[H]
+# \centering
+# \includegraphics[width=\columnwidth]{figures/fig4_val_perplexity.png}
+# \caption{Validation perplexity tracked over 20k pretraining steps, confirming stable generalization to unseen text (final perplexity: 5.15).}
+# \end{figure}
+# 
+# \subsection{Extractive QA Performance}
+# The extractive evaluation on the full SQuAD v2 validation set validated the efficacy of our custom pretraining. While RoBERTa-base established the performance ceiling, our scratch-built encoder achieved an F1 of 58.2, surpassing DistilBERT and confirming that our custom pretraining yields a competitive span-selection representation.
+# 
+# \begin{table}[H]
+# \centering
+# \scriptsize
+# \caption{Extractive QA on full SQuAD v2 validation (11,873 examples).}
+# \begin{tabular}{@{}lcc@{}}
+# \toprule
+# \textbf{Model} & \textbf{EM} & \textbf{F1} \\
+# \midrule
