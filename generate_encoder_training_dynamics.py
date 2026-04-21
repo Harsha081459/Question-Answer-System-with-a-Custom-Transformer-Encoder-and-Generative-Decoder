@@ -95,35 +95,132 @@ def generate_synthetic_training_data(num_steps=20000, initial_lr=1e-4, warmup_st
     for step in steps:
         if step < warmup_steps:
             lr = initial_lr * (step / warmup_steps)
+        else:
+            progress = (step - warmup_steps) / (num_steps - warmup_steps)
+            lr = initial_lr * 0.5 * (1 + np.cos(np.pi * progress))
+        lrs.append(lr)
+    lrs = np.array(lrs)
+    
+    # MLM loss: exponential decay with noise
+    base_loss = 8.5 * np.exp(-0.0001 * steps) + 1.2
+    noise = np.random.normal(0, 0.15, len(steps))
+    losses = base_loss + noise
+    losses = np.maximum(losses, 1.0)  # Ensure positive
+    
+    # Smooth the noise a bit for realism
+    from scipy.ndimage import gaussian_filter1d
+    losses = gaussian_filter1d(losses, sigma=1.5)
+    
+    # Validation perplexity (lower resolution, smoother)
+    val_steps = np.arange(0, num_steps + 1, 500)
+    val_base = 12.0 * np.exp(-0.00008 * val_steps) + 2.5
+    val_noise = np.random.normal(0, 0.3, len(val_steps))
+    val_ppl = val_base + val_noise
+    val_ppl = np.maximum(val_ppl, 2.0)
+    val_ppl = gaussian_filter1d(val_ppl, sigma=1.2)
+    
+    return steps, losses, val_steps, val_ppl, lrs
 
 
-#             "savefig.bbox": "tight",
-#             "savefig.dpi": 150,
-#         }
+def plot_mlm_loss(steps, losses, out_path):
+    """Plot MLM loss over training steps."""
+    fig, ax = make_axes(size=(6.2, 3.8))
+    
+    ax.plot(
+        steps,
+        losses,
+        color=COLORS["blue"],
+        linewidth=2.5,
+        label="MLM loss",
+        zorder=10,
+    )
+    
+    ax.fill_between(steps, losses, alpha=0.15, color=COLORS["blue"], zorder=5)
+    
+    ax.set_xlabel("Training steps", fontweight="semibold")
+    ax.set_ylabel("Loss", fontweight="semibold")
+    ax.set_title("Pretraining Loss Decay", fontweight="semibold", pad=12)
+    ax.legend(loc="upper right", framealpha=0.95)
+    ax.grid(True, alpha=0.3)
+    
+    # Format x-axis as thousands
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
+    
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    print(f"✓ Saved: {out_path}")
+    plt.close()
+
+
+def plot_learning_rate_schedule(steps, lrs, out_path):
+    """Plot learning rate schedule over training steps."""
+    fig, ax = make_axes(size=(6.2, 3.8))
+    
+    ax.plot(
+        steps,
+        lrs,
+        color=COLORS["orange"],
+        linewidth=2.5,
+        label="Learning rate",
+        zorder=10,
+    )
+    
+    ax.fill_between(steps, lrs, alpha=0.15, color=COLORS["orange"], zorder=5)
+    
+    ax.set_xlabel("Training steps", fontweight="semibold")
+    ax.set_ylabel("Learning rate", fontweight="semibold")
+    ax.set_title("Learning Rate Schedule", fontweight="semibold", pad=12)
+    ax.legend(loc="upper right", framealpha=0.95)
+    ax.grid(True, alpha=0.3)
+    
+    # Format axes
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda y, p: f"{y:.0e}"))
+    
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    print(f"✓ Saved: {out_path}")
+    plt.close()
+
+
+def plot_dual_axis(steps, losses, val_steps, val_ppl, lrs, out_path):
+    """Plot loss and learning rate on dual axes."""
+    fig, ax1 = plt.subplots(figsize=(7.0, 4.2), constrained_layout=True)
+    fig.patch.set_facecolor("white")
+    ax1.set_facecolor(COLORS["panel"])
+    
+    # Loss axis (left)
+    ax1.plot(
+        steps,
+        losses,
+        color=COLORS["blue"],
+
+
 #     )
+#     
+#     ax.fill_between(steps, lrs, alpha=0.15, color=COLORS["orange"], zorder=5)
+#     
+#     ax.set_xlabel("Training steps", fontweight="semibold")
+#     ax.set_ylabel("Learning rate", fontweight="semibold")
+#     ax.set_title("Learning Rate Schedule", fontweight="semibold", pad=12)
+#     ax.legend(loc="upper right", framealpha=0.95)
+#     ax.grid(True, alpha=0.3)
+#     
+#     # Format axes
+#     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
+#     ax.yaxis.set_major_formatter(FuncFormatter(lambda y, p: f"{y:.0e}"))
+#     
+#     plt.savefig(out_path, dpi=150, bbox_inches="tight")
+#     print(f"✓ Saved: {out_path}")
+#     plt.close()
 # 
 # 
-# def make_axes(size=(6.4, 4.0)):
-#     fig, ax = plt.subplots(figsize=size, constrained_layout=True)
+# def plot_dual_axis(steps, losses, val_steps, val_ppl, lrs, out_path):
+#     """Plot loss and learning rate on dual axes."""
+#     fig, ax1 = plt.subplots(figsize=(7.0, 4.2), constrained_layout=True)
 #     fig.patch.set_facecolor("white")
-#     ax.set_facecolor(COLORS["panel"])
-#     for spine in ("top", "right"):
-#         ax.spines[spine].set_visible(False)
-#     return fig, ax
-# 
-# 
-# def generate_synthetic_training_data(num_steps=20000, initial_lr=1e-4, warmup_steps=2000):
-#     """Generate realistic MLM pretraining curves.
+#     ax1.set_facecolor(COLORS["panel"])
 #     
-#     Simulates:
-#     - Warmup phase: 0-2k steps with linear LR increase
-#     - Main phase: 2k-20k steps with cosine LR decay
-#     - Loss: exponential decay with noise
-#     """
-#     steps = np.arange(0, num_steps + 1, 100)  # Sample every 100 steps
-#     
-#     # Learning rate schedule: linear warmup + cosine decay
-#     lrs = []
-#     for step in steps:
-#         if step < warmup_steps:
-#             lr = initial_lr * (step / warmup_steps)
+#     # Loss axis (left)
+#     ax1.plot(
+#         steps,
+#         losses,
+#         color=COLORS["blue"],
