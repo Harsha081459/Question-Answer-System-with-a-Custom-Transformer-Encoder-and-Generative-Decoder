@@ -150,35 +150,188 @@ def training_history_plot(history_path: Path, title: str, out_path: Path, color:
             marker="o",
             markersize=9,
             markerfacecolor="white",
+            markeredgecolor=color,
+            markeredgewidth=2.0,
+        )
+    else:
+        ax.scatter(
+            epochs,
+            losses,
+            s=130,
+            color=color,
+            edgecolor="white",
+            linewidth=1.5,
+            zorder=3,
+        )
+
+    for epoch, loss in zip(epochs, losses):
+        ax.annotate(
+            f"{loss:.3f}",
+            xy=(epoch, loss),
+            xytext=(0, 10),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            color=COLORS["ink"],
+            fontweight="semibold",
+        )
+
+    start = losses[0]
+    final = losses[-1]
+    delta = final - start
+    summary_lines = [
+        f"Epochs logged: {len(epochs)}",
+        f"Start loss: {start:.3f}",
+        f"Final loss: {final:.3f}",
+    ]
+    if len(epochs) > 1:
+        summary_lines.append(f"Delta: {delta:+.3f}")
+    else:
+        summary_lines.append("Single logged epoch")
+
+    ax.text(
+        0.02,
+        0.06,
+        "\n".join(summary_lines),
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=9.2,
+        color=COLORS["ink"],
+        bbox={
+            "boxstyle": "round,pad=0.35",
+            "facecolor": "#EEF4FB",
+            "edgecolor": "#C9D5E4",
+            "linewidth": 1.0,
+        },
+    )
+
+    ax.set_title(title, pad=12, fontweight="semibold")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Train loss")
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.grid(True, axis="y")
+    ax.grid(False, axis="x")
+
+    epoch_min = min(epochs)
+    epoch_max = max(epochs)
+    if epoch_min == epoch_max:
+        ax.set_xlim(epoch_min - 0.5, epoch_max + 0.5)
+    else:
+        ax.set_xlim(epoch_min - 0.15, epoch_max + 0.15)
+
+    if len(losses) == 1:
+        pad = max(0.03, abs(final) * 0.08)
+    else:
+        span = max(losses) - min(losses)
+        pad = max(0.03, span * 0.30)
+    ax.set_ylim(min(losses) - pad, max(losses) + pad)
+
+    fig.savefig(out_path, dpi=320)
+    plt.close(fig)
 
 
-#     }
-#     return mapping.get(name, name.replace("hf_", "").replace("_", " "))
+def extractive_baseline_plot(data_path: Path, out_path: Path) -> None:
+    data = load_json(data_path)
+    rows = data["ranking_by_best_f1"]
+
+    labels = [pretty_extractive_name(row["name"]) for row in rows]
+    em = []
+    f1 = []
+    for row in rows:
+        model = next(item for item in data["models"] if item["name"] == row["name"])
+        summary = model["summary"]
+        em.append(float(summary["best_exact"]))
+        f1.append(float(summary["best_f1"]))
+
+    x = list(range(len(labels)))
+    width = 0.34
+
+    fig, ax = make_axes(size=(7.4, 4.15))
+    em_bars = ax.bar([i - width / 2 for i in x], em, width=width, color=COLORS["blue"], label="EM")
+    f1_bars = ax.bar([i + width / 2 for i in x], f1, width=width, color=COLORS["orange"], label="F1")
+
+    annotate_vertical_bars(ax, em_bars, fmt="{:.1f}")
+    annotate_vertical_bars(ax, f1_bars, fmt="{:.1f}")
+
+    ax.set_title("Extractive QA baselines on SQuAD v2", pad=12, fontweight="semibold")
+    ax.set_ylabel("Score")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=14, ha="right")
+    ax.set_ylim(0, max(max(em), max(f1)) * 1.16)
+    ax.grid(True, axis="y")
+    ax.grid(False, axis="x")
+    ax.legend(loc="upper right", ncol=2)
+    ax.text(
+        0.02,
+        0.95,
+        "Higher is better",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=9.2,
+        color=COLORS["subtle"],
+    )
+
+    fig.savefig(out_path, dpi=320)
+    plt.close(fig)
+
+
+def generative_comparison_plot(data_path: Path, out_path: Path) -> None:
+    data = load_json(data_path)
+    rows = data["ranking_by_f1"]
+
+    labels = []
+    scores = []
+    colors = []
+    for row in rows:
+        model = next(item for item in data["models"] if item["name"] == row["name"])
+        labels.append(pretty_generative_name(row["name"]))
+        scores.append(float(row["f1"]))
+        if model["name"] == "our_hybrid_decoder":
+            colors.append(COLORS["blue"])
+        elif model["name"] == "t5-base":
+            colors.append(COLORS["green"])
+        elif model["name"] == "t5-small":
+            colors.append(COLORS["gray"])
+        else:
+            colors.append(COLORS["teal"])
+
+    fig, ax = make_axes(size=(7.1, 4.0))
+    bars = ax.bar(labels, scores, color=colors, width=0.72)
+    annotate_vertical_bars(ax, bars, fmt="{:.1f}")
+
+    ax.set_title("Generative QA F1 on the shared 1k validation subset", pad=12, fontweight="semibold")
+
+
+# 
+#     fig.savefig(out_path, dpi=320)
+#     plt.close(fig)
 # 
 # 
-# def pretty_generative_name(name: str) -> str:
-#     mapping = {
-#         "our_hybrid_decoder": "Hybrid",
-#         "t5-small": "T5-small",
-#         "t5-base": "T5-base",
-#         "google_flan-t5-small": "Flan-T5-small",
-#     }
-#     return mapping.get(name, name.replace("_", " "))
+# def generative_comparison_plot(data_path: Path, out_path: Path) -> None:
+#     data = load_json(data_path)
+#     rows = data["ranking_by_f1"]
 # 
+#     labels = []
+#     scores = []
+#     colors = []
+#     for row in rows:
+#         model = next(item for item in data["models"] if item["name"] == row["name"])
+#         labels.append(pretty_generative_name(row["name"]))
+#         scores.append(float(row["f1"]))
+#         if model["name"] == "our_hybrid_decoder":
+#             colors.append(COLORS["blue"])
+#         elif model["name"] == "t5-base":
+#             colors.append(COLORS["green"])
+#         elif model["name"] == "t5-small":
+#             colors.append(COLORS["gray"])
+#         else:
+#             colors.append(COLORS["teal"])
 # 
-# def training_history_plot(history_path: Path, title: str, out_path: Path, color: str) -> None:
-#     history = load_json(history_path)
-#     epochs = [int(item["epoch"]) for item in history]
-#     losses = [float(item["train_loss"]) for item in history]
+#     fig, ax = make_axes(size=(7.1, 4.0))
+#     bars = ax.bar(labels, scores, color=colors, width=0.72)
+#     annotate_vertical_bars(ax, bars, fmt="{:.1f}")
 # 
-#     fig, ax = make_axes(size=(6.35, 3.95))
-# 
-#     if len(epochs) > 1:
-#         ax.plot(
-#             epochs,
-#             losses,
-#             color=color,
-#             linewidth=3.0,
-#             marker="o",
-#             markersize=9,
-#             markerfacecolor="white",
+#     ax.set_title("Generative QA F1 on the shared 1k validation subset", pad=12, fontweight="semibold")
