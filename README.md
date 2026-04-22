@@ -87,35 +87,79 @@ The application is deployed and publicly accessible on HuggingFace Spaces:
 ├── standard_generative_decoder.py      # Phase 3: Standard Transformer decoder baseline
 ├── generative_data.py                  # Phase 3: Data pipeline for generative QA
 ├── generative_finetuning.py            # Phase 3: Multi-stage generative training
+├── generative_evaluation.py            # Phase 3: EM/F1/ROUGE-L/BLEU evaluation
+├── generative_inference.py             # Phase 3: Generative QA inference
+│
+├── compare_extractive_models.py        # Model comparison scripts
+├── compare_generative_models.py        # Model comparison scripts
+├── generate_report_figures.py          # Report figure generation
+├── generate_all_report_figures.py      # All report figures
+├── generate_encoder_training_dynamics.py # Training dynamics visualization
+│
+├── Dockerfile                          # HuggingFace Spaces deployment
+├── requirements.txt                    # Python dependencies
+├── README_GENERATIVE_DECODER.md        # Detailed generative QA documentation
+├── README_MLM_PRETRAINING.md           # Detailed pre-training documentation
+│
+├── NLP project.pdf                     # Project specification
+├── NLP_Report.pdf                      # Final project report
+└── report.tex                          # LaTeX source for the report
+```
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Python 3.10+
+- PyTorch 2.2+
+
+### Installation
+```bash
+git clone https://github.com/Harsha081459/Question-Answer-System-with-a-Custom-Transformer-Encoder-and-Generative-Decoder.git
+cd Question-Answer-System-with-a-Custom-Transformer-Encoder-and-Generative-Decoder
+pip install -r requirements.txt
+```
+
+### Run Locally
+```bash
+uvicorn app:app --host 0.0.0.0 --port 7860
+```
+Then open [http://localhost:7860](http://localhost:7860) in your browser.
+
+> **Note:** Model checkpoint files are not included in this repository due to their large size. They are hosted on [HuggingFace Spaces](https://huggingface.co/spaces/hv-123/QA-Engine).
+
+---
 
 
-#                      ▼
-#          ┌───────────────────────┐
-#          │   FastAPI Web App     │
-#          │   Premium Dark UI     │
-#          │   HuggingFace Spaces  │
-#          └───────────────────────┘
+
+# ├── NLP project.pdf                     # Project specification
+# ├── NLP_Report.pdf                      # Final project report
+# └── report.tex                          # LaTeX source for the report
 # ```
 # 
 # ---
 # 
-# ## 📁 Project Structure
+# ## 🚀 Getting Started
 # 
+# ### Prerequisites
+# - Python 3.10+
+# - PyTorch 2.2+
+# 
+# ### Installation
+# ```bash
+# git clone https://github.com/Harsha081459/Question-Answer-System-with-a-Custom-Transformer-Encoder-and-Generative-Decoder.git
+# cd Question-Answer-System-with-a-Custom-Transformer-Encoder-and-Generative-Decoder
+# pip install -r requirements.txt
 # ```
-# ├── app.py                              # FastAPI web server
-# ├── static/                             # Frontend UI
-# │   ├── index.html                      # Main HTML page
-# │   ├── style.css                       # Premium dark mode styles
-# │   └── main.js                         # API interaction & AbortController
-# │
-# ├── mlm_pretraining.py                  # Phase 1: Custom encoder pre-training (MLM)
-# │
-# ├── extractive_finetuning.py            # Phase 2: SQuAD fine-tuning for extractive QA
-# ├── extractive_inference.py             # Phase 2: Extractive QA inference
-# ├── extractive_error_analysis.py        # Phase 2: Error analysis
-# ├── extractive_threshold_tuning.py      # Phase 2: No-answer threshold tuning
-# │
-# ├── main_hybrid_decoder.py              # Phase 3: Custom hybrid decoder architecture
-# ├── standard_generative_decoder.py      # Phase 3: Standard Transformer decoder baseline
-# ├── generative_data.py                  # Phase 3: Data pipeline for generative QA
-# ├── generative_finetuning.py            # Phase 3: Multi-stage generative training
+# 
+# ### Run Locally
+# ```bash
+# uvicorn app:app --host 0.0.0.0 --port 7860
+# ```
+# Then open [http://localhost:7860](http://localhost:7860) in your browser.
+# 
+# > **Note:** Model checkpoint files are not included in this repository due to their large size. They are hosted on [HuggingFace Spaces](https://huggingface.co/spaces/hv-123/QA-Engine).
+# 
+# ---
+# 
