@@ -192,35 +192,132 @@ def plot_dual_axis(steps, losses, val_steps, val_ppl, lrs, out_path):
         steps,
         losses,
         color=COLORS["blue"],
+        linewidth=2.5,
+        label="Training loss",
+        zorder=10,
+    )
+    ax1.fill_between(steps, losses, alpha=0.1, color=COLORS["blue"], zorder=5)
+    
+    ax1.scatter(
+        val_steps,
+        val_ppl,
+        color=COLORS["teal"],
+        s=40,
+        label="Validation perplexity",
+        zorder=15,
+        alpha=0.7,
+    )
+    
+    ax1.set_xlabel("Training steps", fontweight="semibold")
+    ax1.set_ylabel("Loss / Perplexity", fontweight="semibold", color=COLORS["blue"])
+    ax1.tick_params(axis="y", labelcolor=COLORS["blue"])
+    ax1.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
+    ax1.grid(True, alpha=0.3, zorder=0)
+    for spine in ("top", "right"):
+        ax1.spines[spine].set_visible(False)
+    
+    # Learning rate axis (right)
+    ax2 = ax1.twinx()
+    ax2.plot(
+        steps,
+        lrs,
+        color=COLORS["orange"],
+        linewidth=2.0,
+        linestyle="--",
+        label="Learning rate",
+        alpha=0.85,
+        zorder=8,
+    )
+    ax2.set_ylabel("Learning rate", fontweight="semibold", color=COLORS["orange"])
+    ax2.tick_params(axis="y", labelcolor=COLORS["orange"])
+    ax2.yaxis.set_major_formatter(FuncFormatter(lambda y, p: f"{y:.0e}"))
+    ax2.spines["top"].set_visible(False)
+    
+    # Combined legend
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(
+        lines1 + lines2,
+        labels1 + labels2,
+        loc="upper right",
+        framealpha=0.95,
+        fontsize=10,
+    )
+    
+    fig.suptitle(
+        "Training Performance and Optimization",
+        fontweight="semibold",
+        fontsize=13,
+        y=0.98,
+    )
+    
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    print(f"✓ Saved: {out_path}")
+    plt.close()
 
 
-#     )
+def plot_training_dynamics_summary(steps, losses, val_steps, val_ppl, lrs, out_path):
+    """Create a 2x2 subplot summary of training dynamics."""
+    fig, axes = plt.subplots(2, 2, figsize=(12.0, 8.5), constrained_layout=True)
+    fig.patch.set_facecolor("white")
+    
+    for ax in axes.flat:
+        ax.set_facecolor(COLORS["panel"])
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+    
+    # [0, 0] MLM Loss
+    ax = axes[0, 0]
+    ax.plot(steps, losses, color=COLORS["blue"], linewidth=2.2, label="MLM loss")
+    ax.fill_between(steps, losses, alpha=0.12, color=COLORS["blue"])
+    ax.set_ylabel("Loss", fontweight="semibold", fontsize=10)
+    ax.set_title("A) MLM Loss Trajectory", fontweight="bold", fontsize=11, loc="left")
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
+    ax.grid(True, alpha=0.3)
+    
+    # [0, 1] Validation Perplexity
+    ax = axes[0, 1]
+    ax.scatter(val_steps, val_ppl, color=COLORS["teal"], s=50, alpha=0.7, label="Val. perplexity")
+    ax.plot(val_steps, val_ppl, color=COLORS["teal"], linewidth=1.5, alpha=0.5)
+    ax.set_ylabel("Perplexity", fontweight="semibold", fontsize=10)
+    ax.set_title("B) Validation Perplexity", fontweight="bold", fontsize=11, loc="left")
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
+    ax.grid(True, alpha=0.3)
+    
+    # [1, 0] Learning Rate Schedule
+    ax = axes[1, 0]
+    ax.plot(steps, lrs, color=COLORS["orange"], linewidth=2.2)
+    ax.fill_between(steps, lrs, alpha=0.12, color=COLORS["orange"])
+    ax.set_xlabel("Training steps", fontweight="semibold", fontsize=10)
+
+
+#     fig.patch.set_facecolor("white")
 #     
-#     ax.fill_between(steps, lrs, alpha=0.15, color=COLORS["orange"], zorder=5)
+#     for ax in axes.flat:
+#         ax.set_facecolor(COLORS["panel"])
+#         for spine in ("top", "right"):
+#             ax.spines[spine].set_visible(False)
 #     
-#     ax.set_xlabel("Training steps", fontweight="semibold")
-#     ax.set_ylabel("Learning rate", fontweight="semibold")
-#     ax.set_title("Learning Rate Schedule", fontweight="semibold", pad=12)
-#     ax.legend(loc="upper right", framealpha=0.95)
+#     # [0, 0] MLM Loss
+#     ax = axes[0, 0]
+#     ax.plot(steps, losses, color=COLORS["blue"], linewidth=2.2, label="MLM loss")
+#     ax.fill_between(steps, losses, alpha=0.12, color=COLORS["blue"])
+#     ax.set_ylabel("Loss", fontweight="semibold", fontsize=10)
+#     ax.set_title("A) MLM Loss Trajectory", fontweight="bold", fontsize=11, loc="left")
+#     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
 #     ax.grid(True, alpha=0.3)
 #     
-#     # Format axes
+#     # [0, 1] Validation Perplexity
+#     ax = axes[0, 1]
+#     ax.scatter(val_steps, val_ppl, color=COLORS["teal"], s=50, alpha=0.7, label="Val. perplexity")
+#     ax.plot(val_steps, val_ppl, color=COLORS["teal"], linewidth=1.5, alpha=0.5)
+#     ax.set_ylabel("Perplexity", fontweight="semibold", fontsize=10)
+#     ax.set_title("B) Validation Perplexity", fontweight="bold", fontsize=11, loc="left")
 #     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
-#     ax.yaxis.set_major_formatter(FuncFormatter(lambda y, p: f"{y:.0e}"))
+#     ax.grid(True, alpha=0.3)
 #     
-#     plt.savefig(out_path, dpi=150, bbox_inches="tight")
-#     print(f"✓ Saved: {out_path}")
-#     plt.close()
-# 
-# 
-# def plot_dual_axis(steps, losses, val_steps, val_ppl, lrs, out_path):
-#     """Plot loss and learning rate on dual axes."""
-#     fig, ax1 = plt.subplots(figsize=(7.0, 4.2), constrained_layout=True)
-#     fig.patch.set_facecolor("white")
-#     ax1.set_facecolor(COLORS["panel"])
-#     
-#     # Loss axis (left)
-#     ax1.plot(
-#         steps,
-#         losses,
-#         color=COLORS["blue"],
+#     # [1, 0] Learning Rate Schedule
+#     ax = axes[1, 0]
+#     ax.plot(steps, lrs, color=COLORS["orange"], linewidth=2.2)
+#     ax.fill_between(steps, lrs, alpha=0.12, color=COLORS["orange"])
+#     ax.set_xlabel("Training steps", fontweight="semibold", fontsize=10)
