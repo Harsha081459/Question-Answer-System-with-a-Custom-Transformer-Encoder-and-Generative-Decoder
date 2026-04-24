@@ -303,35 +303,187 @@ def generative_comparison_plot(data_path: Path, out_path: Path) -> None:
     annotate_vertical_bars(ax, bars, fmt="{:.1f}")
 
     ax.set_title("Generative QA F1 on the shared 1k validation subset", pad=12, fontweight="semibold")
+    ax.set_ylabel("F1")
+    ax.set_ylim(0, max(scores) * 1.16)
+    ax.grid(True, axis="y")
+    ax.grid(False, axis="x")
+    ax.tick_params(axis="x", rotation=12)
+    ax.text(
+        0.02,
+        0.95,
+        "Best external baseline: T5-base",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=9.2,
+        color=COLORS["subtle"],
+    )
+
+    fig.savefig(out_path, dpi=320)
+    plt.close(fig)
 
 
+def output_length_plot(data_path: Path, out_path: Path) -> None:
+    data = load_json(data_path)
+    rows = data["ranking_by_f1"]
+
+    labels = []
+    values = []
+    colors = []
+    for row in rows:
+        model = next(item for item in data["models"] if item["name"] == row["name"])
+        labels.append(pretty_generative_name(row["name"]))
+        values.append(float(model["avg_output_len"]))
+        if model["name"] == "our_hybrid_decoder":
+            colors.append(COLORS["blue"])
+        elif model["name"] == "t5-base":
+            colors.append(COLORS["green"])
+        elif model["name"] == "t5-small":
+            colors.append(COLORS["gray"])
+        else:
+            colors.append(COLORS["teal"])
+
+    fig, ax = make_axes(size=(7.1, 3.85))
+    bars = ax.barh(labels, values, color=colors, height=0.62)
+    annotate_horizontal_bars(ax, bars, fmt="{:.2f}")
+
+    ax.set_title("Average generated length", pad=12, fontweight="semibold")
+    ax.set_xlabel("Tokens")
+    ax.set_xlim(0, max(values) * 1.25)
+    ax.grid(True, axis="x")
+    ax.grid(False, axis="y")
+    ax.invert_yaxis()
+    ax.text(
+        0.98,
+        0.95,
+        "Shorter is more concise",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=9.2,
+        color=COLORS["subtle"],
+    )
+
+    fig.savefig(out_path, dpi=320)
+    plt.close(fig)
+
+
+def _panel_background(ax, title: str, panel_label: str) -> None:
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+    ax.add_patch(
+        FancyBboxPatch(
+            (0.015, 0.03),
+            0.97,
+            0.94,
+            boxstyle="round,pad=0.012,rounding_size=0.02",
+            linewidth=1.2,
+            edgecolor="#CBD5E1",
+            facecolor="#FCFEFF",
+        )
+    )
+    ax.add_patch(
+        FancyBboxPatch(
+            (0.03, 0.875),
+            0.94,
+            0.075,
+            boxstyle="round,pad=0.01,rounding_size=0.018",
+            linewidth=0,
+            facecolor="#2A2E35",
+        )
+    )
+    ax.text(
+        0.5,
+        0.912,
+        title,
+        ha="center",
+        va="center",
+        color="white",
+        fontsize=14.2,
+        fontweight="semibold",
+    )
+    ax.text(
+        0.045,
+        0.912,
+        panel_label,
+        ha="left",
+        va="center",
+        color="#B8C2D0",
+        fontsize=12.0,
+        fontweight="semibold",
+    )
+
+
+def _rounded_box(ax, x, y, w, h, text, facecolor, edgecolor="#7B8794", text_color="#1F2937", fontsize=9.6):
+    ax.add_patch(
+        FancyBboxPatch(
+            (x, y),
+            w,
+            h,
+            boxstyle="round,pad=0.014,rounding_size=0.012",
+            linewidth=1.2,
+            edgecolor=edgecolor,
+            facecolor=facecolor,
+        )
+    )
+    ax.text(
+        x + w / 2,
+        y + h / 2,
+        text,
+        ha="center",
+        va="center",
+        fontsize=fontsize,
+        color=text_color,
+        fontweight="medium",
+        linespacing=1.15,
+    )
+
+
+def _arrow(ax, start, end, color="#6B7280", lw=1.5, rad=0.0):
+    ax.add_patch(
+        FancyArrowPatch(
+            start,
+            end,
+            arrowstyle="-|>",
+            mutation_scale=14,
+            linewidth=lw,
+            color=color,
+            connectionstyle=f"arc3,rad={rad}",
+        )
+    )
+
+
+def architecture_overview_figure(out_path: Path) -> None:
+
+
+#         )
+#     )
+#     ax.text(
+#         x + w / 2,
+#         y + h / 2,
+#         text,
+#         ha="center",
+#         va="center",
+#         fontsize=fontsize,
+#         color=text_color,
+#         fontweight="medium",
+#         linespacing=1.15,
+#     )
 # 
-#     fig.savefig(out_path, dpi=320)
-#     plt.close(fig)
+# 
+# def _arrow(ax, start, end, color="#6B7280", lw=1.5, rad=0.0):
+#     ax.add_patch(
+#         FancyArrowPatch(
+#             start,
+#             end,
+#             arrowstyle="-|>",
+#             mutation_scale=14,
+#             linewidth=lw,
+#             color=color,
+#             connectionstyle=f"arc3,rad={rad}",
+#         )
+#     )
 # 
 # 
-# def generative_comparison_plot(data_path: Path, out_path: Path) -> None:
-#     data = load_json(data_path)
-#     rows = data["ranking_by_f1"]
-# 
-#     labels = []
-#     scores = []
-#     colors = []
-#     for row in rows:
-#         model = next(item for item in data["models"] if item["name"] == row["name"])
-#         labels.append(pretty_generative_name(row["name"]))
-#         scores.append(float(row["f1"]))
-#         if model["name"] == "our_hybrid_decoder":
-#             colors.append(COLORS["blue"])
-#         elif model["name"] == "t5-base":
-#             colors.append(COLORS["green"])
-#         elif model["name"] == "t5-small":
-#             colors.append(COLORS["gray"])
-#         else:
-#             colors.append(COLORS["teal"])
-# 
-#     fig, ax = make_axes(size=(7.1, 4.0))
-#     bars = ax.bar(labels, scores, color=colors, width=0.72)
-#     annotate_vertical_bars(ax, bars, fmt="{:.1f}")
-# 
-#     ax.set_title("Generative QA F1 on the shared 1k validation subset", pad=12, fontweight="semibold")
+# def architecture_overview_figure(out_path: Path) -> None:
