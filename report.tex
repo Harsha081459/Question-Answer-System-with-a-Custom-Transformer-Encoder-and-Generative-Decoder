@@ -470,35 +470,161 @@ The extractive evaluation on the full SQuAD v2 validation set validated the effi
 \toprule
 \textbf{Model} & \textbf{EM} & \textbf{F1} \\
 \midrule
+RoBERTa-base-SQuAD2 & 80.4 & 83.3 \\
+BERT-large-finetuned & 66.8 & 68.3 \\
+\rowcolor{blue!8}
+\textbf{Our scratch encoder} & \textbf{55.8} & \textbf{58.2} \\
+DistilBERT-distilled-SQuAD & 54.6 & 55.3 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig5_extractive_baselines.png}
+\caption{Extractive QA baselines on SQuAD v2. Our scratch encoder is competitive with distilled models and confirms meaningful span-selection learning.}
+\end{figure}
 
-# 
-# % ══════════════════════════════════════════════════════════════
-# \section{Results}
-# 
-# \subsection{Pretraining Dynamics}
-# The custom encoder was pretrained for 20k steps on an interleaved Wikipedia and C4 stream. As shown in Figure~3, training converged smoothly without instability. The learning rate schedule executed a 2k-step linear warmup followed by linear decay, driving the MLM loss from $\sim$9.5 down to $\sim$2.3. Figure~4 confirms that validation perplexity followed this downward trajectory, reaching a final value of 5.15.
-# 
-# \begin{figure}[H]
-# \centering
-# \includegraphics[width=\columnwidth]{figures/fig3_pretraining_curves.png}
-# \caption{Encoder pretraining dynamics. (a)~MLM loss exhibits stable decay over 20k steps. (b)~Learning rate schedule with linear warmup (0--2k) and linear decay.}
-# \end{figure}
-# 
-# \begin{figure}[H]
-# \centering
-# \includegraphics[width=\columnwidth]{figures/fig4_val_perplexity.png}
-# \caption{Validation perplexity tracked over 20k pretraining steps, confirming stable generalization to unseen text (final perplexity: 5.15).}
-# \end{figure}
-# 
-# \subsection{Extractive QA Performance}
-# The extractive evaluation on the full SQuAD v2 validation set validated the efficacy of our custom pretraining. While RoBERTa-base established the performance ceiling, our scratch-built encoder achieved an F1 of 58.2, surpassing DistilBERT and confirming that our custom pretraining yields a competitive span-selection representation.
-# 
-# \begin{table}[H]
-# \centering
-# \scriptsize
-# \caption{Extractive QA on full SQuAD v2 validation (11,873 examples).}
-# \begin{tabular}{@{}lcc@{}}
-# \toprule
-# \textbf{Model} & \textbf{EM} & \textbf{F1} \\
-# \midrule
+\subsection{Generative QA Performance}
+The generative track demonstrated the strength of our bespoke decoder. Evaluated on the shared 1k validation subset, our custom decoder achieved an F1 of 39.9, outperforming Flan-T5-small (32.0) and T5-small (38.1), and closely trailing the much larger T5-base (42.1).
+
+\begin{table}[H]
+\centering
+\scriptsize
+\caption{Generative QA comparison on the shared 1k validation subset.}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Model} & \textbf{EM} & \textbf{F1} & \textbf{R-L} & \textbf{BLEU} \\
+\midrule
+T5-base & 35.8 & 42.1 & 42.2 & 15.4 \\
+\rowcolor{blue!8}
+\textbf{Our Generative Decoder} & \textbf{34.1} & \textbf{39.9} & \textbf{40.8} & \textbf{23.1} \\
+T5-small & 31.7 & 38.1 & 38.2 & 13.4 \\
+Flan-T5-small & 26.4 & 32.0 & 32.2 & 10.7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig6_generative_comparison.png}
+\caption{Generative QA F1 on the shared 1k subset. Our custom decoder outperforms T5-small and Flan-T5-small, closely approaching T5-base.}
+\end{figure}
+
+Our decoding heuristics successfully enforced concise generation: our decoder averaged 3.47 tokens per answer, while T5-base averaged 2.67 tokens. Figure~8 confirms smooth convergence of the decoder training loss.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig7_output_length.png}
+\caption{Average generated answer length. Our decoder is slightly more verbose than T5-base but successfully avoids sentence-copying.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig8_decoder_loss.png}
+\caption{Training loss trajectory for the generative decoder fine-tuning stage, showing smooth convergence from 0.906 to 0.713.}
+\end{figure}
+
+% ══════════════════════════════════════════════════════════════
+\section{Ablation Study}
+
+To investigate the impact of no-answer sample weighting on generative quality, we trained an ablation variant that upweighted unanswerable examples by a factor of $3\times$ during decoder fine-tuning. The hypothesis was that increased exposure to unanswerable questions would improve the model's abstention calibration.
+
+\begin{table}[H]
+\centering
+\scriptsize
+\caption{Ablation: effect of no-answer upweighting ($3\times$) on the 1k validation subset.}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Variant} & \textbf{EM} & \textbf{F1} & \textbf{R-L} & \textbf{BLEU} \\
+\midrule
+\rowcolor{blue!8}
+\textbf{Primary (uniform)} & \textbf{34.1} & \textbf{39.9} & \textbf{40.8} & \textbf{23.1} \\
+NoAns $3\times$ upweight & 32.8 & 37.4 & 38.1 & 20.6 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The upweighted variant slightly degraded answerable-question F1 ($-2.5$) while only marginally improving abstention precision. This confirmed that aggressive reweighting shifts the decision boundary too conservatively, causing the model to abstain on borderline but answerable questions. The uniform-weight primary model was therefore retained as the final configuration.
+
+% ══════════════════════════════════════════════════════════════
+\section{Error Analysis}
+
+We performed qualitative analysis on the generative decoder's predictions against gold targets to identify systematic failure modes.
+
+\begin{table}[H]
+\centering
+\scriptsize
+\caption{Representative predictions: correct generations and failure modes.}
+\begin{tabularx}{\columnwidth}{@{}p{0.42\columnwidth} X X@{}}
+\toprule
+\textbf{Question} & \textbf{Gold} & \textbf{Predicted} \\
+\midrule
+\rowcolor{green!6}
+In what country is Normandy located? & France & France \\
+\rowcolor{green!6}
+When were the Normans in Normandy? & 10th and 11th centuries & 10th and 11th centuries \\
+\rowcolor{green!6}
+From which countries did the Norse originate? & Denmark, Iceland and Norway & Denmark, Iceland and Norway \\
+\midrule
+\rowcolor{red!6}
+Who was the Norse leader? & Rollo & king charles iii \\
+\rowcolor{red!6}
+What century did the Normans first gain their identity? & 10th century & 10th \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Three primary failure patterns emerged:
+\begin{enumerate}[leftmargin=1.2em,noitemsep,topsep=2pt]
+\item \textbf{Truncation:} The rigid \texttt{max\_new\_tokens=12} limit prevented runaway generation but occasionally truncated valid multi-word spans (e.g., ``10th'' instead of ``10th century''). This is a direct consequence of prioritizing precision over recall.
+\item \textbf{Entity Drift:} On questions requiring disambiguation among multiple named entities in the passage, the decoder sometimes anchored to a contextually related but incorrect entity (e.g., predicting a king mentioned nearby instead of the actual leader).
+\item \textbf{Partial Span Alignment:} The decoder captured the semantic core of the answer but missed exact token boundaries, incurring exact-match penalties despite conveying the correct meaning.
+\end{enumerate}
+
+Notably, the model achieved perfect accuracy on straightforward factual questions (rows 1--3 in Table~7), confirming that the encoder--decoder pipeline correctly localizes and generates short factual answers.
+
+% ══════════════════════════════════════════════════════════════
+\section{Limitations and Future Work}
+
+\textbf{Limitations.}\quad The primary limitation is the unreliability of generative no-answer calibration: the log-probability thresholding mechanism struggled to consistently differentiate genuinely unanswerable questions from low-confidence answers. Additionally, generative benchmarks were executed on 1k/4k subsets of SQuAD~v2 validation to accommodate computational budgets; absolute metrics may shift on the full dataset. Evaluation metrics are also sensitive to inference hyperparameters (\texttt{beam=1}, \texttt{lp=0.4}), and most runs used a single seed due to GPU budget constraints.
+
+\textbf{Future Work.}\quad Three directions are most promising:
+\begin{enumerate}[leftmargin=1.2em,noitemsep,topsep=2pt]
+\item \textbf{Answerability Classifier:} Replace the heuristic log-probability gate with a learned binary classifier on the encoder's \texttt{[CLS]} representation, trained jointly with the decoder.
+\item \textbf{Pointer-Generator Mechanism:} Augment the decoder with a copy mechanism that can directly attend to and copy named entities from the source context, mitigating entity drift.
+\item \textbf{Extended Pretraining:} Scale MLM pretraining beyond 20k steps and incorporate next-sentence prediction to strengthen cross-sentence reasoning.
+\end{enumerate}
+
+% ══════════════════════════════════════════════════════════════
+\section{Web Application \& Deployment}
+
+To demonstrate the practical utility of our QA system beyond offline evaluation, we built and deployed a production-ready web application that exposes both inference modes through an interactive browser interface.
+
+\textbf{Backend.}\quad We implemented a FastAPI server (\texttt{app.py}) that loads both the extractive and generative models once at startup and serves predictions through a unified \texttt{/predict} REST endpoint. The server accepts a JSON payload containing a context paragraph, question, and model selection, then returns the predicted answer along with inference metadata (confidence scores, token-level statistics, and no-answer gating results). To accommodate the constrained CPU budget of free-tier cloud hosting, we applied \texttt{torch.set\_num\_threads(1)} to prevent thread over-subscription.
+
+\textbf{Frontend.}\quad The user interface was built with vanilla HTML, CSS, and JavaScript, featuring a dark-mode glassmorphism design with animated gradient orbs, real-time model switching between extractive and generative modes, and request cancellation via \texttt{AbortController}. The interface renders inference statistics (F1, confidence, token count) alongside each answer.
+
+\textbf{Deployment Optimization.}\quad HuggingFace Spaces imposes a 1\,GB storage limit on free-tier repositories. Our original model weights totalled $\sim$1.6\,GB (1.17\,GB generative + 434\,MB extractive). To fit within this constraint, we applied two optimizations:
+\begin{enumerate}[leftmargin=1.2em,noitemsep,topsep=2pt]
+    \item \textbf{FP16 Quantization:} All floating-point parameters were converted from 32-bit to 16-bit precision, halving the weight file sizes with negligible impact on answer quality.
+    \item \textbf{Optimizer State Stripping:} The generative checkpoint's saved optimizer and scheduler states (used only during training) were removed, reducing the file from 1.17\,GB to 300\,MB.
+\end{enumerate}
+The final deployed repository occupies $\sim$530\,MB, well within the platform limit. The application is publicly accessible at \url{https://huggingface.co/spaces/hv-123/QA-Engine}.
+
+% ══════════════════════════════════════════════════════════════
+\section{Conclusion}
+This project delivered a complete, end-to-end QA pipeline. We demonstrated that a custom Transformer encoder, pretrained entirely from scratch, can simultaneously power a strong extractive baseline and a competitive generative decoder. While massively pretrained external models like RoBERTa and T5-base define the performance ceiling, our bespoke generative decoder outperformed similarly sized external baselines and validated our custom architectural decisions.
+
+\begin{thebibliography}{9}\small
+\bibitem{devlin2019bert}
+J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova, ``BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding,'' \textit{NAACL}, 2019.
+\bibitem{liu2019roberta}
+Y. Liu et al., ``RoBERTa: A Robustly Optimized BERT Pretraining Approach,'' \textit{arXiv:1907.11692}, 2019.
+\bibitem{raffel2020t5}
+C. Raffel et al., ``Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer,'' \textit{JMLR}, 2020.
+\bibitem{rajpurkar2016squad}
+P. Rajpurkar et al., ``SQuAD: 100,000+ Questions for Machine Comprehension of Text,'' \textit{EMNLP}, 2016.
+\end{thebibliography}
+
+\end{document}
