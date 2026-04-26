@@ -131,35 +131,48 @@ Then open [http://localhost:7860](http://localhost:7860) in your browser.
 
 ---
 
+## 🔬 Training Pipeline
 
+### Phase 1: Pre-training (MLM)
+Pre-trained a custom Transformer encoder from scratch on Wikipedia using Masked Language Modeling:
+```bash
+python mlm_pretraining.py --out_dir checkpoints_pretrain
+```
 
-# ├── NLP project.pdf                     # Project specification
-# ├── NLP_Report.pdf                      # Final project report
-# └── report.tex                          # LaTeX source for the report
-# ```
-# 
-# ---
-# 
-# ## 🚀 Getting Started
-# 
-# ### Prerequisites
-# - Python 3.10+
-# - PyTorch 2.2+
-# 
-# ### Installation
-# ```bash
-# git clone https://github.com/Harsha081459/Question-Answer-System-with-a-Custom-Transformer-Encoder-and-Generative-Decoder.git
-# cd Question-Answer-System-with-a-Custom-Transformer-Encoder-and-Generative-Decoder
-# pip install -r requirements.txt
-# ```
-# 
-# ### Run Locally
-# ```bash
-# uvicorn app:app --host 0.0.0.0 --port 7860
-# ```
-# Then open [http://localhost:7860](http://localhost:7860) in your browser.
-# 
-# > **Note:** Model checkpoint files are not included in this repository due to their large size. They are hosted on [HuggingFace Spaces](https://huggingface.co/spaces/hv-123/QA-Engine).
-# 
-# ---
-# 
+### Phase 2: Extractive QA
+Fine-tuned the pre-trained encoder on SQuAD v2 for span-based question answering:
+```bash
+python extractive_finetuning.py --output_dir checkpoints_qa_squad
+```
+
+### Phase 3: Generative QA
+Trained a custom hybrid decoder on top of the encoder using a multi-stage curriculum:
+```bash
+python generative_finetuning.py \
+  --decoder_variant hybrid \
+  --tokenizer_path checkpoints_pretrain_base_seq256/step_20000 \
+  --pretrain_ckpt checkpoints_pretrain_base_seq256/step_20000/checkpoint.pt \
+  --output_dir checkpoints_generative_qa
+```
+
+See [README_GENERATIVE_DECODER.md](README_GENERATIVE_DECODER.md) for the full multi-stage training recipe.
+
+---
+
+## 🛠️ Tech Stack
+
+| Component | Technology |
+|---|---|
+| **Deep Learning** | PyTorch, Transformers (tokenizer only) |
+| **Models** | Custom Transformer Encoder + Hybrid Decoder |
+| **Training Data** | SQuAD v1, SQuAD v2, Wikipedia |
+| **Backend** | FastAPI, Uvicorn |
+| **Frontend** | HTML5, CSS3 (Glassmorphism), Vanilla JS |
+| **Deployment** | Docker, HuggingFace Spaces |
+| **Evaluation** | EM, F1, ROUGE-L, BLEU |
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License.
