@@ -193,35 +193,69 @@ def fig_generative():
     data=load_json(ROOT/"comparison_generative_seq2seq_20260426_121748.json")
     names_map={"our_hybrid_decoder":"Our Decoder","t5-small":"T5-small","t5-base":"T5-base","google_flan-t5-small":"Flan-T5-small"}
     rows=data["ranking_by_f1"]
+    labels=[names_map.get(r["name"],r["name"]) for r in rows]
+    f1s=[r["f1"] for r in rows]
+    colors=[PAL[0] if "our" in r["name"] else PAL[2] if "base" in r["name"] else PAL[3] if "flan" in r["name"] else "#78909C" for r in rows]
+    fig,ax=plt.subplots(figsize=(10,6),dpi=300)
+    bars=ax.bar(labels,f1s,color=colors,width=0.6,zorder=3)
+    for bar in bars:
+        ax.annotate(f"{bar.get_height():.1f}",xy=(bar.get_x()+bar.get_width()/2,bar.get_height()),
+            xytext=(0,4),textcoords="offset points",ha="center",fontsize=10,fontweight="semibold")
+    ax.set_ylabel("F1 Score",fontweight="bold")
+    ax.set_title("Generative QA — F1 on Shared 1k Subset",fontweight="bold")
+    ax.set_ylim(0,max(f1s)*1.15); ax.yaxis.grid(True,alpha=0.4,ls="--"); ax.grid(False,axis="x")
+    ax.text(0.97,0.95,"Best external: T5-base",transform=ax.transAxes,ha="right",va="top",fontsize=10,color=SUBTLE)
+    fig.tight_layout(); fig.patch.set_edgecolor(PAL[1]);fig.patch.set_linewidth(1.5)
+    save(fig,"fig6_generative_comparison")
 
+# ── Figure 7: Output length ──
+def fig_length():
+    data=load_json(ROOT/"comparison_generative_seq2seq_20260426_121748.json")
+    names_map={"our_hybrid_decoder":"Our Decoder","t5-small":"T5-small","t5-base":"T5-base","google_flan-t5-small":"Flan-T5-small"}
+    rows=data["ranking_by_f1"]
+    labels=[names_map.get(r["name"],r["name"]) for r in rows]
+    lens=[next(m for m in data["models"] if m["name"]==r["name"])["avg_output_len"] for r in rows]
+    colors=[PAL[0] if "our" in r["name"] else PAL[2] if "base" in r["name"] else PAL[3] if "flan" in r["name"] else "#78909C" for r in rows]
+    fig,ax=plt.subplots(figsize=(10,5),dpi=300)
+    bars=ax.barh(labels,lens,color=colors,height=0.55,zorder=3)
+    for bar in bars:
+        ax.annotate(f"{bar.get_width():.2f}",xy=(bar.get_width(),bar.get_y()+bar.get_height()/2),
+            xytext=(5,0),textcoords="offset points",ha="left",va="center",fontsize=10,fontweight="semibold")
+    ax.set_xlabel("Avg. Tokens",fontweight="bold")
+    ax.set_title("Average Generated Answer Length",fontweight="bold")
+    ax.set_xlim(0,max(lens)*1.3); ax.invert_yaxis()
+    ax.xaxis.grid(True,alpha=0.4,ls="--"); ax.grid(False,axis="y")
+    fig.tight_layout(); fig.patch.set_edgecolor(PAL[2]);fig.patch.set_linewidth(1.5)
+    save(fig,"fig7_output_length")
 
-# 
-# # ── Figure 5: Extractive baselines ──
-# def fig_extractive():
-#     data=load_json(ROOT/"comparison_squadv2_results.json")
-#     names_map={"hf_deepset_roberta-base-squad2":"RoBERTa-base","hf_bert-large-uncased-whole-word-masking-finetuned-squad":"BERT-large",
-#         "custom_scratch_encoder_squadv2":"Our Encoder","hf_distilbert-base-uncased-distilled-squad":"DistilBERT"}
-#     rows=data["ranking_by_best_f1"]
-#     labels=[names_map.get(r["name"],r["name"]) for r in rows]
-#     em=[next(m for m in data["models"] if m["name"]==r["name"])["summary"]["best_exact"] for r in rows]
-#     f1=[next(m for m in data["models"] if m["name"]==r["name"])["summary"]["best_f1"] for r in rows]
-#     x=np.arange(len(labels)); w=0.35
-#     fig,ax=plt.subplots(figsize=(10,6),dpi=300)
-#     b1=ax.bar(x-w/2,em,w,color=PAL[0],label="EM",zorder=3)
-#     b2=ax.bar(x+w/2,f1,w,color=PAL[1],label="F1",zorder=3)
-#     for bars in (b1,b2):
-#         for bar in bars:
-#             ax.annotate(f"{bar.get_height():.1f}",xy=(bar.get_x()+bar.get_width()/2,bar.get_height()),
-#                 xytext=(0,4),textcoords="offset points",ha="center",fontsize=9.5,fontweight="semibold")
-#     ax.set_ylabel("Score",fontweight="bold"); ax.set_xticks(x); ax.set_xticklabels(labels,fontsize=11)
-#     ax.set_title("Extractive QA on SQuAD v2 (threshold-tuned)",fontweight="bold")
-#     ax.set_ylim(0,max(max(em),max(f1))*1.15); ax.legend(ncol=2,fontsize=11)
-#     ax.yaxis.grid(True,alpha=0.4,ls="--"); ax.grid(False,axis="x")
-#     fig.tight_layout(); fig.patch.set_edgecolor(PAL[0]);fig.patch.set_linewidth(1.5)
-#     save(fig,"fig5_extractive_baselines")
-# 
-# # ── Figure 6: Generative comparison ──
-# def fig_generative():
-#     data=load_json(ROOT/"comparison_generative_seq2seq_20260426_121748.json")
-#     names_map={"our_hybrid_decoder":"Our Decoder","t5-small":"T5-small","t5-base":"T5-base","google_flan-t5-small":"Flan-T5-small"}
-#     rows=data["ranking_by_f1"]
+# ── Figure 8: Decoder training loss ──
+def fig_decoder_loss():
+    hp=ROOT/"checkpoints_generative_qa_hybrid_span_restart1_20260426_010636"/"train_history.json"
+    if not hp.exists(): print("  [skip] decoder history not found"); return
+    h=load_json(hp)
+    epochs=[int(e["epoch"]) for e in h]; losses=[float(e["train_loss"]) for e in h]
+    fig,ax=plt.subplots(figsize=(10,5),dpi=300)
+    ax.plot(epochs,losses,color=PAL[0],lw=3,marker="o",ms=9,mfc="white",mec=PAL[0],mew=2)
+    for e,l in zip(epochs,losses):
+        ax.annotate(f"{l:.3f}",xy=(e,l),xytext=(0,10),textcoords="offset points",ha="center",fontsize=10,fontweight="semibold")
+    ax.set_xlabel("Epoch",fontweight="bold"); ax.set_ylabel("Train Loss",fontweight="bold")
+    ax.set_title("Generative Decoder Training Loss",fontweight="bold")
+    ax.yaxis.grid(True,alpha=0.4,ls="--"); ax.grid(False,axis="x")
+    ax.text(0.02,0.06,f"Start: {losses[0]:.3f}\nFinal: {losses[-1]:.3f}\nΔ: {losses[-1]-losses[0]:+.3f}",
+        transform=ax.transAxes,fontsize=9.5,bbox=dict(boxstyle="round,pad=0.35",fc="#EEF4FB",ec="#C9D5E4"))
+    fig.tight_layout(); fig.patch.set_edgecolor(PAL[0]);fig.patch.set_linewidth(1.5)
+    save(fig,"fig8_decoder_loss")
+
+def main():
+    set_theme()
+    print("Generating publication-quality figures...")
+    fig_architecture()
+    fig_enc_dec()
+    fig_training_dynamics()
+    fig_extractive()
+    fig_generative()
+    fig_length()
+    fig_decoder_loss()
+    print(f"All figures saved to {FIGURES}/")
+
+if __name__=="__main__": main()
