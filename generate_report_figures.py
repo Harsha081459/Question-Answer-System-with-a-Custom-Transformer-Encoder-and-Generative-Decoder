@@ -455,35 +455,156 @@ def _arrow(ax, start, end, color="#6B7280", lw=1.5, rad=0.0):
 
 
 def architecture_overview_figure(out_path: Path) -> None:
+    fig, (ax_top, ax_bottom) = plt.subplots(
+        2,
+        1,
+        figsize=(14.2, 7.8),
+        dpi=300,
+        constrained_layout=True,
+    )
+
+    # Top panel: encoder + extractive QA.
+    _panel_background(ax_top, "Encoder + extractive QA", "A")
+    y = 0.60
+    h = 0.16
+    boxes = [
+        (0.04, 0.16, "Input pair\nquestion + context\ninput_ids\ntoken_type_ids\nattention_mask", COLORS["green"], 9.0),
+        (0.23, 0.16, "Embeddings\ntoken + position +\nsegment\nLayerNorm + dropout", COLORS["green"], 9.0),
+        (0.43, 0.23, "12 Transformer blocks\npre-norm residual self-attn\nFFN 3072, 12 heads, hidden 768", COLORS["green"], 8.8),
+        (0.69, 0.13, "Final\nLayerNorm", COLORS["green"], 9.2),
+        (0.85, 0.11, "Contextual states\nshape: L × 768", COLORS["green"], 9.0),
+    ]
+
+    for x, w, text, fc, size in boxes:
+        _rounded_box(ax_top, x, y, w, h, text, fc, fontsize=size)
+
+    for (x1, w1, _, _, _), (x2, _, _, _, _) in zip(boxes[:-1], boxes[1:]):
+        _arrow(ax_top, (x1 + w1, y + h / 2), (x2, y + h / 2))
+
+    head_x, head_y, head_w, head_h = 0.67, 0.28, 0.25, 0.16
+    _rounded_box(
+        ax_top,
+        head_x,
+        head_y,
+        head_w,
+        head_h,
+        "Extractive QA head\nLinear(768→2)\nstart/end logits",
+        "#FBEFDE",
+        edgecolor="#B79A78",
+        fontsize=9.0,
+    )
+    _arrow(ax_top, (boxes[-1][0] + boxes[-1][1] / 2, y), (head_x + head_w / 2, head_y + head_h))
+
+    out_x, out_y, out_w, out_h = 0.68, 0.09, 0.23, 0.12
+    _rounded_box(
+        ax_top,
+        out_x,
+        out_y,
+        out_w,
+        out_h,
+        "Extracted answer\nor no-answer fallback",
+        "#EEF2F7",
+        edgecolor="#C0C8D4",
+        fontsize=8.9,
+    )
+    _arrow(ax_top, (head_x + head_w / 2, head_y), (out_x + out_w / 2, out_y + out_h))
+
+    ax_top.text(
+        0.5,
+        0.195,
+        "The encoder is the shared representation source for both QA modes.",
+        ha="center",
+        va="center",
+        fontsize=9.2,
+        color=COLORS["subtle"],
+    )
+
+    # Bottom panel: decoder + generative QA.
+    _panel_background(ax_bottom, "Decoder + generative QA", "B")
+    y2 = 0.60
+    boxes2 = [
+        (0.04, 0.16, "Target prefix\nBOS + previous tokens\ncausal mask", COLORS["blue_light"], 9.0),
+        (0.23, 0.16, "Decoder embeddings\ntoken + position\nLayerNorm + dropout", COLORS["blue_light"], 9.0),
+        (0.43, 0.25, "Decoder stack\nStandard: 4 TransformerDecoderLayer blocks\nHybrid: 4 custom blocks\nself-attn + cross-attn + FFN", COLORS["blue_light"], 8.6),
+        (0.71, 0.13, "Final\nLayerNorm", COLORS["blue_light"], 9.2),
+        (0.86, 0.11, "Tied LM\nhead", COLORS["blue_light"], 9.2),
+    ]
+
+    for x, w, text, fc, size in boxes2:
+        _rounded_box(ax_bottom, x, y2, w, h, text, fc, fontsize=size)
+
+    for (x1, w1, _, _, _), (x2, _, _, _, _) in zip(boxes2[:-1], boxes2[1:]):
+        _arrow(ax_bottom, (x1 + w1, y2 + h / 2), (x2, y2 + h / 2))
+
+    bridge_x, bridge_y, bridge_w, bridge_h = 0.36, 0.30, 0.24, 0.13
+    _rounded_box(
+        ax_bottom,
+        bridge_x,
+        bridge_y,
+        bridge_w,
+        bridge_h,
+        "Shared encoder memory\nLinear(768→512) bridge",
+        "#EEF2F7",
+        edgecolor="#C0C8D4",
+        fontsize=8.9,
+    )
+    _arrow(ax_bottom, (bridge_x + bridge_w / 2, bridge_y + bridge_h), (boxes2[2][0] + boxes2[2][1] / 2, y2))
+
+    out2_x, out2_y, out2_w, out2_h = 0.76, 0.09, 0.20, 0.12
+    _rounded_box(
+        ax_bottom,
+        out2_x,
+        out2_y,
+        out2_w,
+        out2_h,
+        "Generated answer\nor no-answer fallback",
+        "#EEF2F7",
+        edgecolor="#C0C8D4",
+        fontsize=8.9,
+    )
+    _arrow(ax_bottom, (boxes2[4][0] + boxes2[4][1] / 2, y2), (out2_x + out2_w / 2, out2_y + out2_h))
+
+    ax_bottom.text(
+        0.5,
+        0.195,
+        "The decoder stays aligned to encoder evidence through cross-attention.",
+        ha="center",
+        va="center",
+        fontsize=9.2,
+        color=COLORS["subtle"],
+    )
+
+    fig.savefig(out_path, dpi=320)
+    plt.close(fig)
 
 
-#         )
-#     )
-#     ax.text(
-#         x + w / 2,
-#         y + h / 2,
-#         text,
-#         ha="center",
-#         va="center",
-#         fontsize=fontsize,
-#         color=text_color,
-#         fontweight="medium",
-#         linespacing=1.15,
-#     )
-# 
-# 
-# def _arrow(ax, start, end, color="#6B7280", lw=1.5, rad=0.0):
-#     ax.add_patch(
-#         FancyArrowPatch(
-#             start,
-#             end,
-#             arrowstyle="-|>",
-#             mutation_scale=14,
-#             linewidth=lw,
-#             color=color,
-#             connectionstyle=f"arc3,rad={rad}",
-#         )
-#     )
-# 
-# 
-# def architecture_overview_figure(out_path: Path) -> None:
+def main() -> None:
+    set_theme()
+    FIGURES.mkdir(exist_ok=True)
+
+    architecture_overview_figure(FIGURES / "architecture_overview.png")
+
+    training_history_plot(
+        ROOT / "checkpoints_generative_qa_hybrid_span_restart1_20260426_010636" / "train_history.json",
+        "Primary decoder training loss",
+        FIGURES / "hybrid_prev_loss.png",
+        COLORS["blue"],
+    )
+    training_history_plot(
+        ROOT / "checkpoints_generative_qa_hybrid_span_noans_upweight_20260426_111025" / "train_history.json",
+        "NoAns x3 continuation loss",
+        FIGURES / "hybrid_noans3_loss.png",
+        COLORS["red"],
+    )
+    extractive_baseline_plot(ROOT / "comparison_squadv2_results.json", FIGURES / "extractive_baselines.png")
+    generative_comparison_plot(
+        ROOT / "comparison_generative_seq2seq_20260426_121748.json",
+        FIGURES / "generative_comparison.png",
+    )
+    output_length_plot(ROOT / "comparison_generative_seq2seq_20260426_121748.json", FIGURES / "output_length.png")
+
+    print("Regenerated report figures in:", FIGURES)
+
+
+if __name__ == "__main__":
+    main()
