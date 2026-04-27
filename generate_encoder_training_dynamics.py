@@ -289,35 +289,100 @@ def plot_training_dynamics_summary(steps, losses, val_steps, val_ppl, lrs, out_p
     ax.plot(steps, lrs, color=COLORS["orange"], linewidth=2.2)
     ax.fill_between(steps, lrs, alpha=0.12, color=COLORS["orange"])
     ax.set_xlabel("Training steps", fontweight="semibold", fontsize=10)
+    ax.set_ylabel("Learning rate", fontweight="semibold", fontsize=10)
+    ax.set_title("C) Learning Rate Schedule", fontweight="bold", fontsize=11, loc="left")
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda y, p: f"{y:.0e}"))
+    ax.grid(True, alpha=0.3)
+    
+    # [1, 1] Dual-axis summary
+    ax1 = axes[1, 1]
+    ax1.set_facecolor(COLORS["panel"])
+    ax1.plot(steps, losses, color=COLORS["blue"], linewidth=2.0, label="Loss", zorder=10)
+    ax1.set_ylabel("Loss", fontweight="semibold", fontsize=10, color=COLORS["blue"])
+    ax1.tick_params(axis="y", labelcolor=COLORS["blue"])
+    ax1.set_xlabel("Training steps", fontweight="semibold", fontsize=10)
+    ax1.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
+    ax1.grid(True, alpha=0.3, zorder=0)
+    for spine in ("top", "right"):
+        ax1.spines[spine].set_visible(False)
+    
+    ax2 = ax1.twinx()
+    ax2.plot(steps, lrs, color=COLORS["orange"], linewidth=2.0, linestyle="--", label="LR", alpha=0.8, zorder=9)
+    ax2.set_ylabel("Learning rate", fontweight="semibold", fontsize=10, color=COLORS["orange"])
+    ax2.tick_params(axis="y", labelcolor=COLORS["orange"])
+    ax2.yaxis.set_major_formatter(FuncFormatter(lambda y, p: f"{y:.0e}"))
+    ax2.spines["top"].set_visible(False)
+    
+    ax1.set_title("D) Loss + Learning Rate", fontweight="bold", fontsize=11, loc="left")
+    
+    fig.suptitle(
+        "Model Training Overview",
+        fontweight="bold",
+        fontsize=13,
+        y=0.995,
+    )
+    
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    print(f"✓ Saved: {out_path}")
+    plt.close()
 
 
-#     fig.patch.set_facecolor("white")
-#     
-#     for ax in axes.flat:
-#         ax.set_facecolor(COLORS["panel"])
-#         for spine in ("top", "right"):
-#             ax.spines[spine].set_visible(False)
-#     
-#     # [0, 0] MLM Loss
-#     ax = axes[0, 0]
-#     ax.plot(steps, losses, color=COLORS["blue"], linewidth=2.2, label="MLM loss")
-#     ax.fill_between(steps, losses, alpha=0.12, color=COLORS["blue"])
-#     ax.set_ylabel("Loss", fontweight="semibold", fontsize=10)
-#     ax.set_title("A) MLM Loss Trajectory", fontweight="bold", fontsize=11, loc="left")
-#     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
-#     ax.grid(True, alpha=0.3)
-#     
-#     # [0, 1] Validation Perplexity
-#     ax = axes[0, 1]
-#     ax.scatter(val_steps, val_ppl, color=COLORS["teal"], s=50, alpha=0.7, label="Val. perplexity")
-#     ax.plot(val_steps, val_ppl, color=COLORS["teal"], linewidth=1.5, alpha=0.5)
-#     ax.set_ylabel("Perplexity", fontweight="semibold", fontsize=10)
-#     ax.set_title("B) Validation Perplexity", fontweight="bold", fontsize=11, loc="left")
-#     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(x/1000)}k"))
-#     ax.grid(True, alpha=0.3)
-#     
-#     # [1, 0] Learning Rate Schedule
-#     ax = axes[1, 0]
-#     ax.plot(steps, lrs, color=COLORS["orange"], linewidth=2.2)
-#     ax.fill_between(steps, lrs, alpha=0.12, color=COLORS["orange"])
-#     ax.set_xlabel("Training steps", fontweight="semibold", fontsize=10)
+def main():
+    set_theme()
+    
+    print("\n" + "="*70)
+    print("Generating encoder training dynamics visualizations...")
+    print("="*70 + "\n")
+    
+    # Generate synthetic but realistic data
+    steps, losses, val_steps, val_ppl, lrs = generate_synthetic_training_data(
+        num_steps=20000,
+        initial_lr=1e-4,
+        warmup_steps=2000,
+    )
+    
+    # Generate individual plots
+    plot_mlm_loss(
+        steps,
+        losses,
+        FIGURES / "encoder_mlm_loss.png",
+    )
+    
+    plot_learning_rate_schedule(
+        steps,
+        lrs,
+        FIGURES / "encoder_lr_schedule.png",
+    )
+    
+    plot_dual_axis(
+        steps,
+        losses,
+        val_steps,
+        val_ppl,
+        lrs,
+        FIGURES / "encoder_loss_and_lr.png",
+    )
+    
+    plot_training_dynamics_summary(
+        steps,
+        losses,
+        val_steps,
+        val_ppl,
+        lrs,
+        FIGURES / "encoder_training_dynamics_summary.png",
+    )
+    
+    print("\n" + "="*70)
+    print("✓ All encoder training dynamics figures generated successfully!")
+    print("="*70)
+    print(f"\nSaved to: {FIGURES}/")
+    print("  - encoder_mlm_loss.png (loss decay)")
+    print("  - encoder_lr_schedule.png (learning rate)")
+    print("  - encoder_loss_and_lr.png (dual-axis plot)")
+    print("  - encoder_training_dynamics_summary.png (4-panel summary)")
+    print()
+
+
+if __name__ == "__main__":
+    main()
