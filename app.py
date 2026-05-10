@@ -63,35 +63,101 @@ async def lifespan(app: FastAPI):
         extractive_cfg = ModelConfig(**json.load(f))
         
     extractive_tokenizer = AutoTokenizer.from_pretrained(str(ext_dir), use_fast=True)
+    if extractive_tokenizer.pad_token is None:
+        extractive_tokenizer.pad_token = extractive_tokenizer.sep_token
+        
+    extractive_model = BertForQuestionAnswering(extractive_cfg)
+    ext_state = load_file(str(ext_dir / "model.safetensors"))
+    extractive_model.load_state_dict(ext_state, strict=True)
+    extractive_model.to(device)
+    extractive_model.eval()
+    
+    # Load Generative Model
+    print("Loading Generative Model...")
+    gen_payload = torch.load(gen_path, map_location="cpu", weights_only=False)
+    generative_enc_cfg = ModelConfig(**gen_payload["encoder_config"])
+    gen_dec_cfg = DecoderConfig(**gen_payload["decoder_config"])
+    generative_model = StandardGenerativeQAModel(generative_enc_cfg, gen_dec_cfg)
+    generative_model.load_state_dict(gen_payload["model"], strict=True)
+    generative_model.to(device)
+    generative_model.eval()
+    
+    generative_tokenizer = AutoTokenizer.from_pretrained(str(gen_dir), use_fast=True)
+    if generative_tokenizer.pad_token is None:
+        generative_tokenizer.pad_token = generative_tokenizer.sep_token
+
+    print("Models loaded successfully.")
+    yield
+    print("Shutting down...")
+
+app = FastAPI(lifespan=lifespan)
+
+@app.post("/predict")
+def predict(req: PredictRequest):
+    if req.model_type == "extractive":
+        return run_extractive(req)
+    elif req.model_type == "generative":
+        return run_generative(req)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid model_type. Must be 'extractive' or 'generative'.")
+
+def run_extractive(req: PredictRequest):
+    max_length = min(req.max_length, extractive_cfg.max_position_embeddings)
+    doc_stride = min(req.doc_stride, max(8, max_length // 4))
+
+    enc = extractive_tokenizer(
+        [req.question],
+        [req.context],
+        truncation="only_second",
+        max_length=max_length,
+        stride=doc_stride,
+        return_overflowing_tokens=True,
+        return_offsets_mapping=True,
+        padding=False,
+        return_tensors="pt",
+    )
+    
+    input_ids = enc["input_ids"].to(device)
+    attention_mask = enc["attention_mask"].to(device)
+    token_type_ids = enc.get("token_type_ids", torch.zeros_like(input_ids)).to(device)
+
+    with torch.no_grad():
+        out = extractive_model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
+        
+    start_logits = out["start_logits"].cpu().numpy()
+    end_logits = out["end_logits"].cpu().numpy()
+
+    best_score = -1e30
+    best_text = ""
 
 
-#     no_answer_threshold: float = 0.0
+#         raise HTTPException(status_code=400, detail="Invalid model_type. Must be 'extractive' or 'generative'.")
 # 
-# # Global models
-# extractive_model = None
-# extractive_tokenizer = None
-# extractive_cfg = None
+# def run_extractive(req: PredictRequest):
+#     max_length = min(req.max_length, extractive_cfg.max_position_embeddings)
+#     doc_stride = min(req.doc_stride, max(8, max_length // 4))
 # 
-# generative_model = None
-# generative_tokenizer = None
-# generative_enc_cfg = None
-# 
-# device = "cuda" if torch.cuda.is_available() else "cpu"
-# 
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     global extractive_model, extractive_tokenizer, extractive_cfg
-#     global generative_model, generative_tokenizer, generative_enc_cfg
+#     enc = extractive_tokenizer(
+#         [req.question],
+#         [req.context],
+#         truncation="only_second",
+#         max_length=max_length,
+#         stride=doc_stride,
+#         return_overflowing_tokens=True,
+#         return_offsets_mapping=True,
+#         padding=False,
+#         return_tensors="pt",
+#     )
 #     
-#     # Paths 
-#     ext_dir = Path("checkpoints_qa_squad_v2_lr5e-5_len256_e3")
-#     gen_path = Path("checkpoints_generative_qa_stageE_tradeoff/best.pt")
-#     gen_dir = Path("checkpoints_generative_qa_stageE_tradeoff")
-#     
-#     # Load Extractive Model
-#     print("Loading Extractive Model...")
-#     config_path = ext_dir / "model_config.json"
-#     with open(config_path, "r", encoding="utf-8") as f:
-#         extractive_cfg = ModelConfig(**json.load(f))
+#     input_ids = enc["input_ids"].to(device)
+#     attention_mask = enc["attention_mask"].to(device)
+#     token_type_ids = enc.get("token_type_ids", torch.zeros_like(input_ids)).to(device)
+# 
+#     with torch.no_grad():
+#         out = extractive_model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
 #         
-#     extractive_tokenizer = AutoTokenizer.from_pretrained(str(ext_dir), use_fast=True)
+#     start_logits = out["start_logits"].cpu().numpy()
+#     end_logits = out["end_logits"].cpu().numpy()
+# 
+#     best_score = -1e30
+#     best_text = ""
