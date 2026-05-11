@@ -129,35 +129,100 @@ def run_extractive(req: PredictRequest):
 
     best_score = -1e30
     best_text = ""
+    best_null_score = 1e30
+
+    for i in range(input_ids.shape[0]):
+        offsets = enc["offset_mapping"][i].tolist()
+        seq_ids = enc.sequence_ids(i)
+        ids_i = input_ids[i].tolist()
+        cls_idx = ids_i.index(extractive_tokenizer.cls_token_id)
+        
+        null_score = float(start_logits[i][cls_idx] + end_logits[i][cls_idx])
+        if null_score < best_null_score:
+            best_null_score = null_score
+
+        s_idx = start_logits[i].argsort()[-1 : -req.n_best - 1 : -1].tolist()
+        e_idx = end_logits[i].argsort()[-1 : -req.n_best - 1 : -1].tolist()
+        for s in s_idx:
+            for e in e_idx:
+                if s >= len(offsets) or e >= len(offsets):
+                    continue
+                if seq_ids[s] != 1 or seq_ids[e] != 1:
+                    continue
+                if e < s or (e - s + 1) > req.max_answer_length:
+                    continue
+                st, en = offsets[s][0], offsets[e][1]
+                if st is None or en is None:
+                    continue
+                score = float(start_logits[i][s] + end_logits[i][e])
+                if score > best_score:
+                    best_score = score
+                    best_text = req.context[st:en]
+
+    output = {
+        "question": req.question,
+        "answer": best_text,
+        "span_score": best_score,
+        "null_score": best_null_score,
+        "score_diff_null_minus_span": best_null_score - best_score,
+    }
+    
+    if (best_null_score - best_score) > req.no_answer_threshold:
+        output["answer"] = ""
+        output["predicted_no_answer"] = True
+    else:
+        output["predicted_no_answer"] = False
+
+    return output
+
+def run_generative(req: PredictRequest):
+    tok = generative_tokenizer
+    model = generative_model
+    
+    inp = f"question: {req.question} context: {req.context}"
+    enc = tok(
+        [inp],
+        truncation=True,
+        max_length=min(req.max_length, generative_enc_cfg.max_position_embeddings),
+        return_tensors="pt",
+    )
+    enc_ids = enc["input_ids"].to(device)
+    enc_mask = enc["attention_mask"].to(device)
+    enc_ttype = enc.get("token_type_ids", torch.zeros_like(enc_ids)).to(device)
+
+    bos = tok.cls_token_id if tok.cls_token_id is not None else tok.pad_token_id
+    eos = tok.sep_token_id if tok.sep_token_id is not None else tok.pad_token_id
+    pad = tok.pad_token_id
+    
 
 
-#         raise HTTPException(status_code=400, detail="Invalid model_type. Must be 'extractive' or 'generative'.")
+#         "score_diff_null_minus_span": best_null_score - best_score,
+#     }
+#     
+#     if (best_null_score - best_score) > req.no_answer_threshold:
+#         output["answer"] = ""
+#         output["predicted_no_answer"] = True
+#     else:
+#         output["predicted_no_answer"] = False
 # 
-# def run_extractive(req: PredictRequest):
-#     max_length = min(req.max_length, extractive_cfg.max_position_embeddings)
-#     doc_stride = min(req.doc_stride, max(8, max_length // 4))
+#     return output
 # 
-#     enc = extractive_tokenizer(
-#         [req.question],
-#         [req.context],
-#         truncation="only_second",
-#         max_length=max_length,
-#         stride=doc_stride,
-#         return_overflowing_tokens=True,
-#         return_offsets_mapping=True,
-#         padding=False,
+# def run_generative(req: PredictRequest):
+#     tok = generative_tokenizer
+#     model = generative_model
+#     
+#     inp = f"question: {req.question} context: {req.context}"
+#     enc = tok(
+#         [inp],
+#         truncation=True,
+#         max_length=min(req.max_length, generative_enc_cfg.max_position_embeddings),
 #         return_tensors="pt",
 #     )
+#     enc_ids = enc["input_ids"].to(device)
+#     enc_mask = enc["attention_mask"].to(device)
+#     enc_ttype = enc.get("token_type_ids", torch.zeros_like(enc_ids)).to(device)
+# 
+#     bos = tok.cls_token_id if tok.cls_token_id is not None else tok.pad_token_id
+#     eos = tok.sep_token_id if tok.sep_token_id is not None else tok.pad_token_id
+#     pad = tok.pad_token_id
 #     
-#     input_ids = enc["input_ids"].to(device)
-#     attention_mask = enc["attention_mask"].to(device)
-#     token_type_ids = enc.get("token_type_ids", torch.zeros_like(input_ids)).to(device)
-# 
-#     with torch.no_grad():
-#         out = extractive_model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
-#         
-#     start_logits = out["start_logits"].cpu().numpy()
-#     end_logits = out["end_logits"].cpu().numpy()
-# 
-#     best_score = -1e30
-#     best_text = ""
