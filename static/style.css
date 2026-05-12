@@ -239,35 +239,84 @@ input[type="range"] {
 }
 .checkbox-group label {
     margin-bottom: 0;
+    text-transform: none;
+}
+.checkbox-group input[type="number"] {
+    width: 80px;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid var(--glass-border);
+    color: white;
+    padding: 0.3rem;
+    border-radius: 4px;
+}
 
+/* Buttons */
+.glow-button {
+    width: 100%;
+    padding: 1rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent-gradient);
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    position: relative;
+    overflow: hidden;
+}
 
-# /* Range Inputs */
-# .setting-group {
-#     margin-bottom: 1rem;
-# }
-# 
-# .setting-group label {
-#     display: flex;
-#     justify-content: space-between;
-#     font-size: 0.85rem;
-#     color: var(--text-secondary);
-#     margin-bottom: 0.3rem;
-# }
-# 
-# .val-display {
-#     color: var(--accent-cyan);
-#     font-weight: 600;
-# }
-# 
-# input[type="range"] {
-#     width: 100%;
-#     accent-color: var(--accent-cyan);
-# }
-# 
-# .checkbox-group {
-#     display: flex;
-#     align-items: center;
-#     gap: 0.5rem;
-# }
-# .checkbox-group label {
-#     margin-bottom: 0;
+.glow-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px -10px var(--accent-cyan);
+}
+
+.glow-button:active {
+    transform: translateY(0);
+}
+
+/* Results */
+.result-panel {
+    animation: slideUp 0.4s ease-out;
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.highlight-text {
+    font-size: 1.25rem;
+    line-height: 1.6;
+    margin-top: 1rem;
+    padding: 1.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-left: 4px solid var(--accent-cyan);
+    border-radius: 4px;
+}
+
+.stats {
+    margin-top: 1.5rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Loader */
+.loader {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    border-top-color: var(--accent-cyan);
+    animation: spin 1s ease-in-out infinite;
+    margin: 2rem auto;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
