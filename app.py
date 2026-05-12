@@ -194,35 +194,69 @@ def run_generative(req: PredictRequest):
     eos = tok.sep_token_id if tok.sep_token_id is not None else tok.pad_token_id
     pad = tok.pad_token_id
     
+    no_answer_text = "The context does not contain the answer."
 
+    with torch.no_grad():
+        if req.enable_no_answer_gate:
+            out, pred_logprob, _ = model.generate(
+                encoder_input_ids=enc_ids,
+                encoder_token_type_ids=enc_ttype,
+                encoder_attention_mask=enc_mask,
+                bos_token_id=bos,
+                eos_token_id=eos,
+                pad_token_id=pad,
+                max_new_tokens=req.max_new_tokens,
+                beam_size=req.beam_size,
+                length_penalty=req.length_penalty,
+                return_logprob=True,
+            )
+            out_ids = out[0].tolist()
+        else:
+            out_ids = model.generate(
+                encoder_input_ids=enc_ids,
+                encoder_token_type_ids=enc_ttype,
+                encoder_attention_mask=enc_mask,
+                bos_token_id=bos,
+                eos_token_id=eos,
+                pad_token_id=pad,
+                max_new_tokens=req.max_new_tokens,
+                beam_size=req.beam_size,
+                length_penalty=req.length_penalty,
+            )[0].tolist()
 
-#         "score_diff_null_minus_span": best_null_score - best_score,
-#     }
-#     
-#     if (best_null_score - best_score) > req.no_answer_threshold:
-#         output["answer"] = ""
-#         output["predicted_no_answer"] = True
-#     else:
-#         output["predicted_no_answer"] = False
-# 
-#     return output
-# 
-# def run_generative(req: PredictRequest):
-#     tok = generative_tokenizer
-#     model = generative_model
-#     
-#     inp = f"question: {req.question} context: {req.context}"
-#     enc = tok(
-#         [inp],
-#         truncation=True,
-#         max_length=min(req.max_length, generative_enc_cfg.max_position_embeddings),
-#         return_tensors="pt",
-#     )
-#     enc_ids = enc["input_ids"].to(device)
-#     enc_mask = enc["attention_mask"].to(device)
-#     enc_ttype = enc.get("token_type_ids", torch.zeros_like(enc_ids)).to(device)
-# 
-#     bos = tok.cls_token_id if tok.cls_token_id is not None else tok.pad_token_id
-#     eos = tok.sep_token_id if tok.sep_token_id is not None else tok.pad_token_id
-#     pad = tok.pad_token_id
-#     
+    raw_answer = decode_generated_ids(tok, out_ids, bos=bos, eos=eos, pad=pad)
+
+    output = {"question": req.question, "answer": raw_answer, "raw_answer": raw_answer}
+    if req.enable_no_answer_gate:
+        noans_ids = build_target_ids(
+            tokenizer=tok,
+            text=no_answer_text,
+            bos=bos,
+            eos=eos,
+            max_new_tokens=req.max_new_tokens,
+            device=device,
+        )
+        with torch.no_grad():
+            noans_logprob = model.sequence_logprob(
+                encoder_input_ids=enc_ids,
+                encoder_token_type_ids=enc_ttype,
+                encoder_attention_mask=enc_mask,
+                target_ids=noans_ids,
+                pad_token_id=pad,
+                normalize_by_length=True,
+            )[0].item()
+            
+        score_diff = noans_logprob - pred_logprob
+        gated = score_diff > req.no_answer_threshold
+        output["answer"] = no_answer_text if gated else raw_answer
+        output["gate"] = {
+            "score_diff": score_diff,
+            "pred_avg_logprob": pred_logprob,
+            "no_answer_avg_logprob": noans_logprob,
+            "selected_no_answer": gated,
+        }
+
+    return output
+
+# Serve frontend
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
