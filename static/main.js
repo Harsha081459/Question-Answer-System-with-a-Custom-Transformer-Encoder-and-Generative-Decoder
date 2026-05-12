@@ -67,35 +67,70 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         if (modelType === 'extractive') {
+            payload.doc_stride = parseInt(document.getElementById('doc-stride').value);
+            payload.n_best = parseInt(document.getElementById('n-best').value);
+            payload.max_answer_length = parseInt(document.getElementById('max-answer-length').value);
+            payload.no_answer_threshold = parseFloat(document.getElementById('ext-no-answer-threshold').value);
+        } else {
+            payload.beam_size = parseInt(document.getElementById('beam-size').value);
+            payload.max_new_tokens = parseInt(document.getElementById('max-new-tokens').value);
+            payload.length_penalty = parseFloat(document.getElementById('length-penalty').value);
+            payload.enable_no_answer_gate = enableGateCheckbox.checked;
+            payload.no_answer_threshold = parseFloat(document.getElementById('gen-no-answer-threshold').value);
+        }
+
+        // UI Reset for loading
+        resultContainer.classList.remove('hidden');
+        resultContent.classList.add('hidden');
+        loader.classList.remove('hidden');
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Processing...";
+
+        try {
+            const response = await fetch('/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: abortController.signal
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.detail || "Server error");
+            }
+
+            const data = await response.json();
+            
+            // Display Results
 
 
-# 
-#     // Handle enable no-answer gate checkbox
-#     const enableGateCheckbox = document.getElementById('enable-no-answer-gate');
-#     const gateThresholdContainer = document.getElementById('gate-threshold-container');
-#     enableGateCheckbox.addEventListener('change', (e) => {
-#         if (e.target.checked) {
-#             gateThresholdContainer.classList.remove('hidden');
-#         } else {
-#             gateThresholdContainer.classList.add('hidden');
+#             payload.beam_size = parseInt(document.getElementById('beam-size').value);
+#             payload.max_new_tokens = parseInt(document.getElementById('max-new-tokens').value);
+#             payload.length_penalty = parseFloat(document.getElementById('length-penalty').value);
+#             payload.enable_no_answer_gate = enableGateCheckbox.checked;
+#             payload.no_answer_threshold = parseFloat(document.getElementById('gen-no-answer-threshold').value);
 #         }
-#     });
 # 
-#     // Submit Handler
-#     qaForm.addEventListener('submit', async (e) => {
-#         e.preventDefault();
+#         // UI Reset for loading
+#         resultContainer.classList.remove('hidden');
+#         resultContent.classList.add('hidden');
+#         loader.classList.remove('hidden');
+#         submitBtn.disabled = true;
+#         submitBtn.textContent = "Processing...";
 # 
-#         if (abortController) {
-#             abortController.abort(); // Cancel previous request
-#         }
-#         abortController = new AbortController();
+#         try {
+#             const response = await fetch('/predict', {
+#                 method: 'POST',
+#                 headers: { 'Content-Type': 'application/json' },
+#                 body: JSON.stringify(payload),
+#                 signal: abortController.signal
+#             });
 # 
-#         const modelType = modelTypeSelect.value;
-#         const payload = {
-#             model_type: modelType,
-#             context: document.getElementById('context').value,
-#             question: document.getElementById('question').value,
-#             max_length: parseInt(document.getElementById('max-length').value),
-#         };
+#             if (!response.ok) {
+#                 const err = await response.json();
+#                 throw new Error(err.detail || "Server error");
+#             }
 # 
-#         if (modelType === 'extractive') {
+#             const data = await response.json();
+#             
+#             // Display Results
