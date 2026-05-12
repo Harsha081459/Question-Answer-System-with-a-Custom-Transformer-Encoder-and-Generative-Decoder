@@ -102,35 +102,38 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             
             // Display Results
+            loader.classList.add('hidden');
+            resultContent.classList.remove('hidden');
+            
+            answerText.textContent = data.answer || "[No Answer / Unanswerable]";
+            
+            // Build stats
+            let statsHtml = '';
+            if (modelType === 'extractive') {
+                statsHtml += `<span>Span Score: ${data.span_score.toFixed(4)}</span>`;
+                statsHtml += `<span>Null Score: ${data.null_score.toFixed(4)}</span>`;
+                statsHtml += `<span>Score Diff (Null - Span): ${data.score_diff_null_minus_span.toFixed(4)}</span>`;
+                statsHtml += `<span>Predicted No-Answer: ${data.predicted_no_answer ? "Yes" : "No"}</span>`;
+            } else {
+                if (data.gate && data.gate.enabled !== false) {
+                    statsHtml += `<span>Score Diff: ${data.gate.score_diff.toFixed(4)}</span>`;
+                    statsHtml += `<span>Predicted No-Answer: ${data.gate.selected_no_answer ? "Yes" : "No"}</span>`;
+                }
+            }
+            statsContainer.innerHTML = statsHtml;
 
-
-#             payload.beam_size = parseInt(document.getElementById('beam-size').value);
-#             payload.max_new_tokens = parseInt(document.getElementById('max-new-tokens').value);
-#             payload.length_penalty = parseFloat(document.getElementById('length-penalty').value);
-#             payload.enable_no_answer_gate = enableGateCheckbox.checked;
-#             payload.no_answer_threshold = parseFloat(document.getElementById('gen-no-answer-threshold').value);
-#         }
-# 
-#         // UI Reset for loading
-#         resultContainer.classList.remove('hidden');
-#         resultContent.classList.add('hidden');
-#         loader.classList.remove('hidden');
-#         submitBtn.disabled = true;
-#         submitBtn.textContent = "Processing...";
-# 
-#         try {
-#             const response = await fetch('/predict', {
-#                 method: 'POST',
-#                 headers: { 'Content-Type': 'application/json' },
-#                 body: JSON.stringify(payload),
-#                 signal: abortController.signal
-#             });
-# 
-#             if (!response.ok) {
-#                 const err = await response.json();
-#                 throw new Error(err.detail || "Server error");
-#             }
-# 
-#             const data = await response.json();
-#             
-#             // Display Results
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log('Request cancelled by new submission');
+                return; // Don't reset UI, a new request is taking over
+            }
+            loader.classList.add('hidden');
+            resultContent.classList.remove('hidden');
+            answerText.textContent = `Error: ${error.message}`;
+            statsContainer.innerHTML = '';
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Generate Answer";
+        }
+    });
+});
