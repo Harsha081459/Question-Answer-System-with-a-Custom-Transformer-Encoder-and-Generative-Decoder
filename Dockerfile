@@ -15,6 +15,15 @@ RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 
 # Create a non-root user for HuggingFace Spaces
 RUN useradd -m -u 1000 user
+USER user
+
+# Set environment variables for the user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1
+
+# Move working directory to user home
+WORKDIR $HOME/app
 
 
 # # Use a lightweight python base image
@@ -34,3 +43,12 @@ RUN useradd -m -u 1000 user
 # 
 # # Create a non-root user for HuggingFace Spaces
 # RUN useradd -m -u 1000 user
+# USER user
+# 
+# # Set environment variables for the user
+# ENV HOME=/home/user \
+#     PATH=/home/user/.local/bin:$PATH \
+#     PYTHONUNBUFFERED=1
+# 
+# # Move working directory to user home
+# WORKDIR $HOME/app
