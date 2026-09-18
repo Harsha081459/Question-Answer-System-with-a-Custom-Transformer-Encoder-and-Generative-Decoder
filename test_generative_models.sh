@@ -1,5 +1,5 @@
 #!/bin/bash
-cd "/home/sem6/main file"
+cd "$(dirname "$0")" || exit 1
 Q1="Who created Python?"
 C1="Python was created by Guido van Rossum and first released in 1991. It is a dynamically typed programming language."
 
@@ -16,16 +16,19 @@ models=(
 for m in "${models[@]}"; do
   echo "======================================"
   echo "MODEL: $m"
-  
+  if [[ ! -f "$m/best.pt" ]]; then
+    echo "Skipping unavailable historical training stage. For the published checkpoint, use tests/test_checkpoint_smoke.py."
+    continue
+  fi
   if [[ "$m" == *"stageC"* ]] || [[ "$m" == *"stageD"* ]]; then
     prefix="--instruction_prefix \"Answer in one concise sentence based only on the context.\""
   else
     prefix=""
   fi
-  
+
   echo "Question 1 (Answerable): $Q1"
   eval "python generative_inference.py --checkpoint_path \"$m/best.pt\" --tokenizer_path \"$m\" --decoder_variant hybrid --question \"$Q1\" --context \"$C1\" $prefix"
-  
+
   echo ""
   echo "Question 2 (Unanswerable): $Q2"
   eval "python generative_inference.py --checkpoint_path \"$m/best.pt\" --tokenizer_path \"$m\" --decoder_variant hybrid --question \"$Q2\" --context \"$C2\" $prefix"

@@ -1,9 +1,17 @@
 # Model checkpoints (too large for GitHub)
 Organized_Models/
 checkpoints_*/
+checkpoints/
+saved_models/
+/models_fp16/
+/.cache/huggingface/
 *.pt
+*.pth
+*.onnx
 *.bin
 *.safetensors
+*.pkl
+*.joblib
 *.zip
 
 # Python
@@ -18,8 +26,14 @@ build/
 
 # Virtual environments
 venv/
+.venv/
 env/
+.env
 .env/
+
+# Test/lint caches
+.pytest_cache/
+.ruff_cache/
 
 # IDE
 .vscode/

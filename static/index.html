@@ -27,20 +27,20 @@
                         <label for="model-type">Model Type</label>
                         <div class="custom-select-wrapper">
                             <select id="model-type" name="model_type">
-                                <option value="extractive">Extractive QA (SQuAD v2)</option>
-                                <option value="generative" selected>Generative QA (Hybrid Decoder)</option>
+                                <option value="extractive" selected>Extractive QA (SQuAD v2)</option>
+                                <option value="generative">Generative QA (Experimental)</option>
                             </select>
                         </div>
                     </div>
                     
                     <div class="form-group">
                         <label for="context">Context Passage</label>
-                        <textarea id="context" name="context" rows="6" placeholder="Enter the context passage here..." required></textarea>
+                        <textarea id="context" name="context" rows="6" maxlength="12000" placeholder="Enter the context passage here..." required></textarea>
                     </div>
                     
                     <div class="form-group">
                         <label for="question">Question</label>
-                        <input type="text" id="question" name="question" placeholder="Ask a question about the context..." required>
+                        <input type="text" id="question" name="question" maxlength="512" placeholder="Ask a question about the context..." required>
                     </div>
 
                     <div class="accordion">
@@ -56,14 +56,14 @@
                             </div>
 
                             <!-- Extractive Settings -->
-                            <div id="extractive-settings" class="settings-panel hidden">
+                            <div id="extractive-settings" class="settings-panel">
                                 <div class="setting-group">
                                     <label for="doc-stride">Doc Stride <span class="val-display" id="doc-stride-val">64</span></label>
-                                    <input type="range" id="doc-stride" name="doc_stride" min="16" max="256" value="64">
+                                    <input type="range" id="doc-stride" name="doc_stride" min="16" max="128" value="64">
                                 </div>
                                 <div class="setting-group">
                                     <label for="n-best">N-Best <span class="val-display" id="n-best-val">20</span></label>
-                                    <input type="range" id="n-best" name="n_best" min="1" max="50" value="20">
+                                    <input type="range" id="n-best" name="n_best" min="1" max="40" value="20">
                                 </div>
                                 <div class="setting-group">
                                     <label for="max-answer-length">Max Answer Length <span class="val-display" id="max-answer-length-val">30</span></label>
@@ -76,14 +76,14 @@
                             </div>
 
                             <!-- Generative Settings -->
-                            <div id="generative-settings" class="settings-panel">
+                            <div id="generative-settings" class="settings-panel hidden">
                                 <div class="setting-group">
                                     <label for="beam-size">Beam Size <span class="val-display" id="beam-size-val">4</span></label>
-                                    <input type="range" id="beam-size" name="beam_size" min="1" max="10" value="4">
+                                    <input type="range" id="beam-size" name="beam_size" min="1" max="4" value="4">
                                 </div>
                                 <div class="setting-group">
                                     <label for="max-new-tokens">Max New Tokens <span class="val-display" id="max-new-tokens-val">32</span></label>
-                                    <input type="range" id="max-new-tokens" name="max_new_tokens" min="5" max="128" value="32">
+                                    <input type="range" id="max-new-tokens" name="max_new_tokens" min="5" max="64" value="32">
                                 </div>
                                 <div class="setting-group">
                                     <label for="length-penalty">Length Penalty <span class="val-display" id="length-penalty-val">1.0</span></label>

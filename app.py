@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
+from threading import Lock
 from contextlib import asynccontextmanager
 
 # Optimize CPU threads for HuggingFace Spaces free tier
@@ -18,20 +20,27 @@ from main_hybrid_decoder import GenerativeQAModelHybrid
 from standard_generative_decoder import DecoderConfig, GenerativeQAModel as StandardGenerativeQAModel
 from mlm_pretraining import ModelConfig
 from generative_inference import decode_generated_ids, build_target_ids
+from generative_data import normalize_text
+
+ROOT = Path(__file__).resolve().parent
+MODEL_ROOT = Path(os.environ.get("QA_MODEL_DIR", ROOT / "models_fp16"))
+_inference_lock = Lock()
+
 
 class PredictRequest(BaseModel):
-    model_type: str = Field(..., description="extractive or generative")
-    question: str
-    context: str
-    max_length: int = 256
+    model_config = ConfigDict(str_strip_whitespace=True, allow_inf_nan=False)
+    model_type: Literal["extractive", "generative"] = Field(..., description="extractive or generative")
+    question: str = Field(min_length=1, max_length=512)
+    context: str = Field(min_length=1, max_length=12000)
+    max_length: int = Field(default=256, ge=64, le=512)
     # Extractive args
-    doc_stride: int = 64
-    n_best: int = 20
-    max_answer_length: int = 30
+    doc_stride: int = Field(default=64, ge=0, le=128)
+    n_best: int = Field(default=20, ge=1, le=40)
+    max_answer_length: int = Field(default=30, ge=1, le=128)
     # Generative args
-    beam_size: int = 4
-    max_new_tokens: int = 32
-    length_penalty: float = 1.0
+    beam_size: int = Field(default=4, ge=1, le=4)
+    max_new_tokens: int = Field(default=32, ge=1, le=64)
+    length_penalty: float = Field(default=1.0, ge=0.0, le=2.0)
     enable_no_answer_gate: bool = True
     no_answer_threshold: float = 0.0
 
@@ -52,9 +61,14 @@ async def lifespan(app: FastAPI):
     global generative_model, generative_tokenizer, generative_enc_cfg
     
     # Paths 
-    ext_dir = Path("checkpoints_qa_squad_v2_lr5e-5_len256_e3")
-    gen_path = Path("checkpoints_generative_qa_stageE_tradeoff/best.pt")
-    gen_dir = Path("checkpoints_generative_qa_stageE_tradeoff")
+    ext_dir = MODEL_ROOT / "extractive"
+    gen_dir = MODEL_ROOT / "generative"
+    gen_path = gen_dir / "best.pt"
+    extractive_model = generative_model = None
+    if not (ext_dir / "model.safetensors").is_file() or not gen_path.is_file():
+        print("Checkpoints missing: run python download_models.py and restart. /ready will return 503.")
+        yield
+        return
     
     # Load Extractive Model
     print("Loading Extractive Model...")
@@ -74,10 +88,11 @@ async def lifespan(app: FastAPI):
     
     # Load Generative Model
     print("Loading Generative Model...")
-    gen_payload = torch.load(gen_path, map_location="cpu", weights_only=False)
+    gen_payload = torch.load(gen_path, map_location="cpu", weights_only=True)
     generative_enc_cfg = ModelConfig(**gen_payload["encoder_config"])
     gen_dec_cfg = DecoderConfig(**gen_payload["decoder_config"])
-    generative_model = StandardGenerativeQAModel(generative_enc_cfg, gen_dec_cfg)
+    model_class = GenerativeQAModelHybrid if gen_payload.get("decoder_variant") == "hybrid" else StandardGenerativeQAModel
+    generative_model = model_class(generative_enc_cfg, gen_dec_cfg)
     generative_model.load_state_dict(gen_payload["model"], strict=True)
     generative_model.to(device)
     generative_model.eval()
@@ -92,14 +107,28 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+@app.get("/health")
+def health():
+    return {"status": "ok", "models": {"extractive": extractive_model is not None, "generative": generative_model is not None}}
+
+
+@app.get("/ready")
+def ready():
+    if extractive_model is None or generative_model is None:
+        raise HTTPException(status_code=503, detail="Download the published checkpoints and restart the server")
+    return {"status": "ready", "generative_status": "experimental"}
+
+
 @app.post("/predict")
 def predict(req: PredictRequest):
-    if req.model_type == "extractive":
-        return run_extractive(req)
-    elif req.model_type == "generative":
-        return run_generative(req)
-    else:
-        raise HTTPException(status_code=400, detail="Invalid model_type. Must be 'extractive' or 'generative'.")
+    model = extractive_model if req.model_type == "extractive" else generative_model
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model unavailable; run python download_models.py and restart")
+    with _inference_lock:
+        try:
+            return run_extractive(req) if req.model_type == "extractive" else run_generative(req)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Input cannot be tokenized with these length settings; shorten the question or increase max_length") from exc
 
 def run_extractive(req: PredictRequest):
     max_length = min(req.max_length, extractive_cfg.max_position_embeddings)
@@ -113,7 +142,7 @@ def run_extractive(req: PredictRequest):
         stride=doc_stride,
         return_overflowing_tokens=True,
         return_offsets_mapping=True,
-        padding=False,
+        padding="max_length",
         return_tensors="pt",
     )
     
@@ -256,7 +285,8 @@ def run_generative(req: PredictRequest):
             "selected_no_answer": gated,
         }
 
+    output["predicted_no_answer"] = normalize_text(output["answer"]) in {"", normalize_text(no_answer_text)}
     return output
 
 # Serve frontend
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+app.mount("/", StaticFiles(directory=str(ROOT / "static"), html=True), name="static")

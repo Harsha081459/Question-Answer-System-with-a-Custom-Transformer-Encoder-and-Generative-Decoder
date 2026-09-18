@@ -3,6 +3,10 @@
 A complete, end-to-end Question-Answering system built **from scratch** using custom Transformer architectures. This project implements both **Extractive QA** (span-based answer selection) and **Generative QA** (free-form answer generation) pipelines, trained on the SQuAD dataset and deployed as a premium web application.
 
 <p align="center">
+  <a href="https://github.com/Harsha081459/Question-Answer-System-with-a-Custom-Transformer-Encoder-and-Generative-Decoder/actions/workflows/ci.yml">
+    <img src="https://github.com/Harsha081459/Question-Answer-System-with-a-Custom-Transformer-Encoder-and-Generative-Decoder/actions/workflows/ci.yml/badge.svg" alt="CI"/>
+  </a>
+  &nbsp;
   <a href="https://huggingface.co/spaces/hv-123/QA-Engine">
     <img src="https://img.shields.io/badge/🤗%20Live%20Demo-QA%20Engine-blue?style=for-the-badge" alt="Live Demo"/>
   </a>
@@ -111,23 +115,53 @@ The application is deployed and publicly accessible on HuggingFace Spaces:
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Python 3.10+
-- PyTorch 2.2+
+- Python 3.12 (tested locally and in CI)
+- CPU inference is supported; training requires substantially more resources.
 
 ### Installation
 ```bash
 git clone https://github.com/Harsha081459/Question-Answer-System-with-a-Custom-Transformer-Encoder-and-Generative-Decoder.git
 cd Question-Answer-System-with-a-Custom-Transformer-Encoder-and-Generative-Decoder
+
+# Create a virtual environment
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
 ### Run Locally
 ```bash
-uvicorn app:app --host 0.0.0.0 --port 7860
+python download_models.py
+python download_models.py --check
+uvicorn app:app --host 127.0.0.1 --port 7860
 ```
 Then open [http://localhost:7860](http://localhost:7860) in your browser.
 
-> **Note:** Model checkpoint files are not included in this repository due to their large size. They are hosted on [HuggingFace Spaces](https://huggingface.co/spaces/hv-123/QA-Engine).
+> `download_models.py` fetches the public FP16 artifacts from `hv-123/QA-Engine`
+> at fixed revision `7fda22dce2a8855a49e55e7016c1547dc3d0cd94` into `models_fp16/`.
+> Downloads need internet; serving uses local files. `/health` is liveness and
+> `/ready` is 200 only after both checkpoints load. Without weights the UI still
+> opens, but `/predict` returns an actionable 503. Corrupt/incompatible weights
+> are startup failures, not silently substituted models.
+
+Try extractive mode with context `Python was created by Guido van Rossum and released in 1991.` and question `Who created Python?`. The checkpoint-backed regression test expects `Guido van Rossum`. Long passages use padded overlapping windows. Requests have bounded text and decoding sizes; predictions are serialized to limit memory pressure.
+
+The **generative head is experimental**: the published checkpoint can produce its no-answer template even for answerable questions, including the example above. This is a model-quality limitation, not a successful answer. The API exposes `predicted_no_answer` in addition to gate scores.
+
+For Docker: run the downloader first, then `docker build -t custom-qa .` and `docker run --rm -p 127.0.0.1:7860:7860 custom-qa`. The image includes locally downloaded weights; do not publish it unintentionally. GitHub does not redeploy the separate HF Space automatically.
+
+### Tests
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+```
+The default suite runs on CPU with tiny model configs and checks API validation, missing-model readiness and long-passage inference. No checkpoints, datasets or network are required. The separate CI smoke job downloads the fixed artifacts and tests both real heads.
+
+After downloading weights, run the smoke test with `RUN_QA_SMOKE=1 python -m pytest tests/test_checkpoint_smoke.py -q` (PowerShell: `$env:RUN_QA_SMOKE='1'` before the command). This is an inference regression, not a full SQuAD benchmark.
 
 ---
 
@@ -135,21 +169,20 @@ Then open [http://localhost:7860](http://localhost:7860) in your browser.
 
 ### Extractive QA (SQuAD v2)
 
-Evaluated on the **full** SQuAD v2 validation set (11,873 examples, including unanswerable
-questions). Our encoder is pre-trained from scratch — no public checkpoint was used as a
-starting point — yet it outperforms the distilled DistilBERT baseline.
+Historical results below were transcribed into the original project report; they are not freshly reproduced by CI. The downloadable `models_fp16/extractive/squad_v2_threshold_tuning.json` is stronger provenance for the custom checkpoint: on 11,873 validation examples it records **52.42 EM / 56.02 F1 at threshold 0**, and **55.71 EM / 58.16 F1 at threshold -1.752252** selected on that validation set. This supports a rounded **58.2 threshold-tuned validation F1**, not an untouched test-set result. The earlier 55.8 EM entry is retained in the historical report but differs from the archived 55.71.
+
+The comparison models are differently pretrained/fine-tuned systems, so these are not controlled architecture ablations. Raw cross-model comparison JSON files are not committed; superiority claims need a fresh reproducible evaluation.
 
 | Model | EM | F1 |
 |-------|----|----|
 | RoBERTa-base-SQuAD2 *(ceiling reference)* | 80.4 | 83.3 |
 | BERT-large-finetuned | 66.8 | 68.3 |
-| **Our scratch encoder** | **55.8** | **58.2** |
+| **Our scratch encoder (archived tuned validation)** | **55.71** | **58.16** |
 | DistilBERT-distilled-SQuAD | 54.6 | 55.3 |
 
 ### Generative QA
 
-Evaluated with `generative_evaluation.py` on the shared 1k validation subset (all models
-scored on the identical subset for a like-for-like comparison).
+The original report describes the following results on a 1k validation subset. The raw prediction/evaluation files and exact run manifest are not committed. Treat these as **historical reported values**, not verified performance of the downloadable deployment checkpoint; its smoke test does not reproduce this table.
 
 | Model | EM | F1 | ROUGE-L | BLEU |
 |-------|----|----|---------|------|
@@ -158,10 +191,7 @@ scored on the identical subset for a like-for-like comparison).
 | T5-small | 31.7 | 38.1 | 38.2 | 13.4 |
 | Flan-T5-small | 26.4 | 32.0 | 32.2 | 10.7 |
 
-Our decoder beats both small T5 variants and approaches T5-base while being trained from
-scratch, and it leads every baseline on BLEU (23.1) thanks to constrained decoding
-(greedy, `max_new_tokens=12`, length penalty 0.4) that keeps answers concise —
-3.47 tokens per answer on average.
+The report used greedy decoding, `max_new_tokens=12` and length penalty 0.4. Reproducing comparisons requires matching checkpoints, subsets and no-answer scoring. The provided T5 baselines are loaded without task-specific fine-tuning in the comparison script, so do not interpret the table as general superiority over T5.
 
 ### Pre-training convergence
 
@@ -177,6 +207,24 @@ for it. An ablation that upweighted unanswerable examples 3× made this worse, n
 (F1 39.9 → 37.4), which is why the uniform-weight model was kept as the final configuration.
 The extractive head's CLS null-threshold gating is the more dependable of the two.
 
+### Reproducing the numbers
+
+| Results table | Script |
+|---|---|
+| Extractive QA (our encoder vs. RoBERTa-base-SQuAD2, BERT-large, DistilBERT on the full SQuAD v2 validation set) | `compare_extractive_models.py` |
+| Generative QA (our decoder vs. T5-small, T5-base, Flan-T5-small on the shared 1k validation subset) | `compare_generative_models.py` |
+| Generative EM/F1/ROUGE-L/BLEU for a single checkpoint | `generative_evaluation.py` |
+
+The comparison scripts download SQuAD and selected public baselines; `--output_json` and `--output_csv` select their outputs. The generative comparison defaults to **4,000** examples and an older training checkpoint; it does not reproduce the historical 1k table by default. Use `--help`, specify the intended checkpoint/subset and preserve the full run configuration.
+
+To evaluate only the downloaded extractive checkpoint, use:
+
+```bash
+python compare_extractive_models.py --custom_model_dir models_fp16/extractive --custom_config_dir models_fp16/extractive --hf_models "" --max_eval_examples 100
+```
+
+Remove `--max_eval_examples 100` for full validation. This can be expensive on CPU. Do not label a 100-example smoke evaluation as full-set performance.
+
 ---
 
 ## 🔬 Training Pipeline
@@ -184,13 +232,13 @@ The extractive head's CLS null-threshold gating is the more dependable of the tw
 ### Phase 1: Pre-training (MLM)
 Pre-trained a custom Transformer encoder from scratch on Wikipedia using Masked Language Modeling:
 ```bash
-python mlm_pretraining.py --out_dir checkpoints_pretrain
+python mlm_pretraining.py --out_dir checkpoints_pretrain_base_seq256 --seq_len 256 --max_steps 20000
 ```
 
 ### Phase 2: Extractive QA
 Fine-tuned the pre-trained encoder on SQuAD v2 for span-based question answering:
 ```bash
-python extractive_finetuning.py --output_dir checkpoints_qa_squad
+python extractive_finetuning.py --checkpoint_dir checkpoints_pretrain_base_seq256/step_20000 --dataset squad_v2 --output_dir checkpoints_qa_squad --max_length 256 --doc_stride 64
 ```
 
 ### Phase 3: Generative QA
@@ -223,4 +271,4 @@ See [README_GENERATIVE_DECODER.md](README_GENERATIVE_DECODER.md) for the full mu
 
 ## 📄 License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License — see [LICENSE](LICENSE).

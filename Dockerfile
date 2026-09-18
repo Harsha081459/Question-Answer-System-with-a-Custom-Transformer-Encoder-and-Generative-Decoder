@@ -1,5 +1,5 @@
 # Use a lightweight python base image
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 # Install necessary system dependencies (if any are needed by torch/transformers)
 RUN apt-get update && apt-get install -y --no-install-recommends \
