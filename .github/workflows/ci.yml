@@ -45,3 +45,17 @@ jobs:
       - run: python -m pytest tests/test_checkpoint_smoke.py -q
         env:
           RUN_QA_SMOKE: "1"
+      - name: Build and launch documented Docker demo
+        run: |
+          docker build -t custom-qa .
+          docker run -d --name qa-smoke -p 127.0.0.1:7860:7860 custom-qa
+      - name: Check container inference
+        run: |
+          curl --fail --retry 20 --retry-delay 3 --retry-all-errors http://localhost:7860/ready
+          curl --fail -H 'Content-Type: application/json' -d '{"model_type":"extractive","question":"Who created Python?","context":"Python was created by Guido van Rossum and released in 1991."}' http://localhost:7860/predict | python -c 'import json,sys; assert json.load(sys.stdin)["answer"] == "Guido van Rossum"'
+      - name: Container logs
+        if: failure()
+        run: docker logs qa-smoke
+      - name: Stop container
+        if: always()
+        run: docker stop qa-smoke || true
